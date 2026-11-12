@@ -6,11 +6,8 @@ import {
   Home as HomeIcon, 
   Calendar, 
   FileSpreadsheet, 
-  UserCheck, 
   LogIn, 
-  LogOut, 
-  ShieldCheck, 
-  KeyRound 
+  ShieldCheck 
 } from 'lucide-react';
 
 export default function Navbar({ 
@@ -18,8 +15,7 @@ export default function Navbar({
   setActiveTab, 
   currentUser, 
   onOpenAuthModal, 
-  onOpenChangePasswordModal,
-  onLogout 
+  onOpenProfileModal 
 }) {
   const isAdmin = currentUser?.role === 'admin';
 
@@ -99,55 +95,33 @@ export default function Navbar({
           </nav>
         </div>
 
-        {/* Right: Teacher Profile & Role Badge */}
+        {/* Right: Teacher / Admin Profile Pill */}
         <div className="flex items-center gap-2.5">
           {currentUser ? (
-            <div className="flex items-center gap-2">
-              <div 
-                onClick={onOpenAuthModal}
-                className={`flex items-center gap-2.5 p-1.5 sm:px-3 sm:py-1.5 rounded-2xl border cursor-pointer transition-colors ${
-                  isAdmin 
-                    ? 'bg-amber-50/70 border-amber-200 hover:bg-amber-100/60' 
-                    : 'bg-slate-50 border-slate-200/80 hover:bg-slate-100'
-                }`}
-                title="Click to switch profile or re-login"
-              >
-                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shadow-sm ${
-                  isAdmin ? 'bg-amber-600 text-white' : 'bg-indigo-600 text-white'
-                }`}>
-                  {isAdmin ? <ShieldCheck className="w-4 h-4" /> : currentUser.name.charAt(0)}
-                </div>
-                <div className="hidden sm:block text-left">
-                  <p className="text-xs font-bold text-slate-800 leading-tight">{currentUser.name}</p>
-                  <p className={`text-[10px] font-semibold ${isAdmin ? 'text-amber-700 font-bold' : 'text-indigo-600'}`}>
-                    {isAdmin ? 'School Administrator' : (
-                      currentUser.role === 'class_teacher' 
-                        ? `${currentUser.classTeacherOf || 'Class 8-A'} Teacher` 
-                        : `${currentUser.subject || 'Subject'} Teacher`
-                    )}
-                  </p>
-                </div>
+            <div 
+              onClick={onOpenProfileModal}
+              className={`flex items-center gap-2.5 p-1.5 sm:px-3 sm:py-1.5 rounded-2xl border cursor-pointer transition-all hover:shadow-sm ${
+                isAdmin 
+                  ? 'bg-amber-50/70 border-amber-200 hover:bg-amber-100/60' 
+                  : 'bg-slate-50 border-slate-200/80 hover:bg-slate-100'
+              }`}
+              title="Click to view your profile and account settings"
+            >
+              <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs shadow-sm ${
+                isAdmin ? 'bg-amber-600 text-white' : 'bg-indigo-600 text-white'
+              }`}>
+                {isAdmin ? <ShieldCheck className="w-4 h-4" /> : currentUser.name.charAt(0)}
               </div>
-
-              {/* Change Password Button for Teachers */}
-              {!isAdmin && (
-                <button
-                  onClick={onOpenChangePasswordModal}
-                  className="p-2 rounded-xl border border-slate-200 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 transition-colors"
-                  title="Change your password"
-                >
-                  <KeyRound className="w-4 h-4" />
-                </button>
-              )}
-
-              {/* Sign Out Button */}
-              <button
-                onClick={onLogout}
-                className="p-2 rounded-xl border border-slate-200 text-slate-500 hover:text-rose-600 hover:bg-rose-50 hover:border-rose-200 transition-colors"
-                title="Sign Out"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
+              <div className="hidden sm:block text-left">
+                <p className="text-xs font-bold text-slate-800 leading-tight">{currentUser.name}</p>
+                <p className={`text-[10px] font-semibold ${isAdmin ? 'text-amber-700 font-bold' : 'text-indigo-600'}`}>
+                  {isAdmin ? 'School Administrator' : (
+                    currentUser.role === 'class_teacher' 
+                      ? `${currentUser.classTeacherOf || 'Class 8-A'} Teacher` 
+                      : `${currentUser.subject || 'Subject'} Teacher`
+                  )}
+                </p>
+              </div>
             </div>
           ) : (
             <button

@@ -238,23 +238,28 @@ export async function POST(request) {
 
     // 5. Admin Updates Teacher
     if (action === 'admin_update_teacher') {
-      const { id, name, email, role, className, subject } = body;
+      const { id, name, email, role, className, subject, password } = body;
+
+      const updateData = {
+        name,
+        email: email.toLowerCase(),
+        role,
+        class_name: className,
+        subject
+      };
+      if (password && password.trim()) {
+        updateData.password = password.trim();
+      }
 
       try {
         await supabase
           .from('profiles')
-          .update({
-            name,
-            email: email.toLowerCase(),
-            role,
-            class_name: className,
-            subject
-          })
+          .update(updateData)
           .eq('id', id);
       } catch (e) {}
 
       fallbackProfiles = fallbackProfiles.map(p => 
-        p.id === id ? { ...p, name, email, role, class_name: className, subject } : p
+        p.id === id ? { ...p, ...updateData } : p
       );
 
       return NextResponse.json({ success: true });

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import Navbar from '@/components/Navbar';
 import Toast from '@/components/Toast';
 import DashboardTab from '@/components/DashboardTab';
@@ -12,7 +13,7 @@ import ExportAttendanceModal from '@/components/ExportAttendanceModal';
 import StudentDetailModal from '@/components/StudentDetailModal';
 import EmailModal from '@/components/EmailModal';
 import AuthModal from '@/components/AuthModal';
-import ChangePasswordModal from '@/components/ChangePasswordModal';
+import ProfileModal from '@/components/ProfileModal';
 
 export default function App() {
   // Navigation: 'home' | 'attendance' | 'marksheet' | 'admin'
@@ -21,7 +22,7 @@ export default function App() {
   // Authentication State
   const [currentUser, setCurrentUser] = useState(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   // Student Roster & Marksheet
   const [students, setStudents] = useState([]);
@@ -64,14 +65,15 @@ export default function App() {
         console.error(e);
       }
     } else {
+      // Default to Class Teacher Mrs. Priya Sharma
       const defaultTeacher = {
         id: 't1',
         name: 'Mrs. Priya Sharma',
-        email: 'priya.sharma@stmarys.edu',
+        email: 'priya@myschool.com',
         role: 'class_teacher',
         classTeacherOf: 'Class 8-A',
         subject: 'Mathematics',
-        school: "MySchool"
+        school: 'MySchool'
       };
       setCurrentUser(defaultTeacher);
       localStorage.setItem('edusnap_user', JSON.stringify(defaultTeacher));
@@ -106,7 +108,8 @@ export default function App() {
     setCurrentUser(null);
     localStorage.removeItem('edusnap_user');
     setActiveTab('home');
-    showToast('Logged out');
+    setIsAuthModalOpen(true);
+    showToast('Signed out successfully');
   };
 
   // Calculations
@@ -150,11 +153,22 @@ export default function App() {
     }
   };
 
-  // Update Marks
+  // Update Marks with Role Permission Enforcement
   const updateSubjectMark = async (rollNo, subjectKey, val) => {
-    if (currentUser?.role === 'subject_teacher' && currentUser.subject.toLowerCase() !== subjectKey.toLowerCase()) {
-      showToast(`🔒 Access restricted: Only ${currentUser.subject} teacher can edit.`);
-      return;
+    // Permission check
+    if (currentUser?.role === 'subject_teacher') {
+      const userSub = (currentUser.subject || '').toLowerCase();
+      let match = userSub === subjectKey.toLowerCase();
+      if (userSub.includes('science') && subjectKey === 'science') match = true;
+      if (userSub.includes('math') && subjectKey === 'maths') match = true;
+      if (userSub.includes('english') && subjectKey === 'english') match = true;
+      if (userSub.includes('social') && subjectKey === 'social') match = true;
+      if (userSub.includes('hindi') && subjectKey === 'hindi') match = true;
+
+      if (!match) {
+        showToast(`🔒 Access restricted: Only ${currentUser.subject} teacher can edit.`);
+        return;
+      }
     }
 
     const num = val === '' ? '' : Math.min(25, Math.max(0, Number(val)));
@@ -237,7 +251,6 @@ export default function App() {
     }
   };
 
-  // Open Scanner
   const handleOpenScan = (type) => {
     setScanInitialType(type);
     setIsScanModalOpen(true);
@@ -257,61 +270,106 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `Class_8A_Marksheet_Unit_Test_1_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `Class_8A_Marksheet_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     showToast("📊 Full marksheet exported to CSV!");
   };
 
-  // Excel / CSV File Import
+  // Download Sample Excel Template
+  const handleDownloadExcelTemplate = () => {
+    const templateData = [
+      {
+        "Roll No": "01",
+        "Student Name": "Aakash Verma",
+        "Maths": 21,
+        "Science": 23,
+        "English": 20,
+        "Social": 19,
+        "Hindi": 22,
+        "Parent Email": "parent.verma@example.com",
+        "Parent Phone": "9876543201"
+      },
+      {
+        "Roll No": "02",
+        "Student Name": "Ananya Gupta",
+        "Maths": 25,
+        "Science": 25,
+        "English": 24,
+        "Social": 23,
+        "Hindi": 24,
+        "Parent Email": "parent.gupta@example.com",
+        "Parent Phone": "9876543202"
+      }
+    ];
+
+    const worksheet = XLSX.utils.json_to_sheet(templateData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Marksheet_Template");
+    XLSX.writeFile(workbook, "MySchool_Marksheet_Import_Template.xlsx");
+    showToast("📥 Downloaded Sample Excel Template!");
+  };
+
+  // Universal Excel & CSV Import (supports .xlsx, .xls, .csv)
   const handleExcelImport = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = async (event) => {
-      const content = event.target.result;
-      const lines = content.split('\n').filter(l => l.trim().length > 0);
-      if (lines.length <= 1) {
-        showToast("⚠️ File is empty or has invalid formatting.");
-        return;
-      }
+    reader.onload = async (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonRows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
 
-      const imported = [];
-      for (let i = 1; i < lines.length; i++) {
-        const parts = lines[i].split(',').map(p => p.replace(/^"|"$/g, '').trim());
-        if (parts.length >= 2) {
-          imported.push({
-            rollNo: parts[0] || `0${i}`,
-            name: parts[1] || `Student ${i}`,
+        if (!jsonRows || jsonRows.length === 0) {
+          showToast("⚠️ The uploaded spreadsheet is empty.");
+          return;
+        }
+
+        const imported = jsonRows.map((row, idx) => {
+          // Normalize column names
+          const roll = String(row['Roll No'] || row['Roll'] || row['rollNo'] || row['roll'] || (idx + 1)).padStart(2, '0');
+          const name = row['Student Name'] || row['Name'] || row['name'] || `Student ${roll}`;
+          const parentEmail = row['Parent Email'] || row['Email'] || row['email'] || '';
+          const parentPhone = row['Parent Phone'] || row['Phone'] || row['phone'] || '';
+
+          return {
+            rollNo: roll,
+            name,
             className: 'Class 8-A',
-            parentEmail: parts[2] || `parent${i}@example.com`,
-            parentPhone: parts[3] || `987654320${i}`,
+            parentEmail,
+            parentPhone: String(parentPhone),
             attendance: 'P',
             emailed: false,
             marks: {
-              maths: Number(parts[4]) || 20,
-              science: Number(parts[5]) || 20,
-              english: Number(parts[6]) || 20,
-              social: Number(parts[7]) || 20,
-              hindi: Number(parts[8]) || 20,
+              maths: Number(row['Maths'] || row['Mathematics'] || row['maths']) || 0,
+              science: Number(row['Science'] || row['science']) || 0,
+              english: Number(row['English'] || row['english']) || 0,
+              social: Number(row['Social'] || row['Social Studies'] || row['social']) || 0,
+              hindi: Number(row['Hindi'] || row['hindi']) || 0,
             }
-          });
-        }
-      }
+          };
+        });
 
-      if (imported.length > 0) {
         setStudents(imported);
         await fetch('/api/students', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'bulk_replace', students: imported })
         });
-        showToast(`✅ Successfully imported ${imported.length} student records!`);
+
+        showToast(`✅ Successfully imported ${imported.length} student marks from Excel!`);
+      } catch (err) {
+        console.error('Excel parse error:', err);
+        showToast("⚠️ Failed to parse Excel file. Please use the template.");
       }
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
+    e.target.value = ''; // Reset input
   };
 
   // Single Email Composer
@@ -321,7 +379,7 @@ export default function App() {
 
     if (type === 'attendance') {
       subject = `Absence Notice - ${student.name} (${currentUser?.classTeacherOf || 'Class 8-A'})`;
-      message = `Dear Parent,\n\nThis is to notify you that ${student.name} (Roll No: ${student.rollNo}) was marked ABSENT today (${new Date().toLocaleDateString()}) in ${currentUser?.classTeacherOf || 'Class 8-A'}.\n\nPlease ensure school regularity.\n\nWarm regards,\n${currentUser?.name || 'Class Teacher'}\n${currentUser?.school || "MySchool"}`;
+      message = `Dear Parent,\n\nThis is to notify you that ${student.name} (Roll No: ${student.rollNo}) was marked ABSENT today (${new Date().toLocaleDateString()}) in ${currentUser?.classTeacherOf || 'Class 8-A'}.\n\nPlease ensure school regularity.\n\nWarm regards,\n${currentUser?.name || 'Class Teacher'}\n${currentUser?.school || 'MySchool'}`;
     } else {
       const tot = calculateStudentTotal(student.marks);
       const pct = calculateStudentPercentage(student.marks);
@@ -339,7 +397,7 @@ export default function App() {
         `Total Score: ${tot} / 125 (${pct}%)\n` +
         `Overall Grade: ${gr}\n` +
         `Class: ${currentUser?.classTeacherOf || 'Class 8-A'}\n\n` +
-        `Warm regards,\n${currentUser?.name || 'Class Teacher'}\n${currentUser?.school || "MySchool"}`;
+        `Warm regards,\n${currentUser?.name || 'Class Teacher'}\n${currentUser?.school || 'MySchool'}`;
     }
 
     setEmailModalData({ student, type, subject, message });
@@ -377,7 +435,7 @@ export default function App() {
         type="file" 
         ref={fileInputRef} 
         onChange={handleExcelImport} 
-        accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel" 
+        accept=".xlsx, .xls, .csv" 
         className="hidden" 
       />
 
@@ -390,8 +448,7 @@ export default function App() {
         setActiveTab={setActiveTab}
         currentUser={currentUser}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
-        onOpenChangePasswordModal={() => setIsChangePasswordModalOpen(true)}
-        onLogout={handleLogout}
+        onOpenProfileModal={() => setIsProfileModalOpen(true)}
       />
 
       {/* Main Tab Content */}
@@ -431,6 +488,7 @@ export default function App() {
             onUpdateMark={updateSubjectMark}
             onOpenScanModal={handleOpenScan}
             onTriggerExcelImport={() => fileInputRef.current?.click()}
+            onDownloadExcelTemplate={handleDownloadExcelTemplate}
             onExportMarksheetCSV={handleExportMarksheetCSV}
             onOpenEmailSingle={handleOpenEmailSingle}
             onOpenEmailAll={handleOpenEmailAll}
@@ -451,18 +509,20 @@ export default function App() {
         )}
       </main>
 
-      {/* Modals */}
+      {/* Profile & Account Settings Modal */}
+      <ProfileModal 
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        showToast={showToast}
+      />
+
+      {/* Auth / Login Modal (Shown when not logged in or switching after sign out) */}
       <AuthModal 
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         onLoginSuccess={handleLoginSuccess}
-        showToast={showToast}
-      />
-
-      <ChangePasswordModal 
-        isOpen={isChangePasswordModalOpen}
-        onClose={() => setIsChangePasswordModalOpen(false)}
-        currentUser={currentUser}
         showToast={showToast}
       />
 

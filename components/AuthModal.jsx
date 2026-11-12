@@ -194,26 +194,17 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, showToast }
                     {selectedTeacher.role === 'class_teacher' ? `Class Teacher (${selectedTeacher.class_name || 'Class 8-A'})` : `Subject Teacher (${selectedTeacher.subject})`}
                   </p>
                 </div>
-                <div className="text-right">
-                  <span className="text-[10px] text-slate-400 block">Default Password:</span>
-                  <span className="font-mono text-xs font-bold text-indigo-700">
-                    {getDefaultPassHint(selectedTeacher.name)}
-                  </span>
-                </div>
               </div>
             )}
 
             <div>
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-slate-700">Password</label>
-                <span className="text-[10px] text-slate-400">Default is firstname@123</span>
-              </div>
+              <label className="text-xs font-semibold text-slate-700">Password</label>
               <div className="relative mt-1">
                 <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                 <input 
                   type="password"
                   required
-                  placeholder={`Enter password (e.g. ${selectedTeacher ? getDefaultPassHint(selectedTeacher.name) : 'priya@123'})`}
+                  placeholder="Enter your password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -248,16 +239,13 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, showToast }
             </div>
 
             <div>
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-slate-700">Admin Password</label>
-                <span className="text-[10px] text-slate-400 font-mono">admin@123</span>
-              </div>
+              <label className="text-xs font-semibold text-slate-700">Admin Password</label>
               <div className="relative mt-1">
                 <Lock className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                 <input 
                   type="password"
                   required
-                  placeholder="Enter admin password (admin@123)"
+                  placeholder="Enter your password"
                   value={adminPassword}
                   onChange={(e) => setAdminPassword(e.target.value)}
                   className="w-full text-xs pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500"

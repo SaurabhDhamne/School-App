@@ -7,98 +7,39 @@ export async function POST(request) {
 
     const apiKey = userApiKey || process.env.GEMINI_API_KEY;
 
-    // Realistic OCR response when API key is not configured or in mock/demo mode
-    if (!apiKey) {
-      if (mode === 'attendance') {
-        return NextResponse.json({
-          success: true,
-          mock: true,
-          data: {
-            sheetType: 'Handwritten Attendance Register',
-            date: '11-Nov-2026',
-            totalScanned: 10,
-            presentCount: 8,
-            absentCount: 2,
-            records: [
-              { rollNo: '01', name: 'Aakash Verma', status: 'P', confidence: '98%' },
-              { rollNo: '02', name: 'Ananya Gupta', status: 'P', confidence: '99%' },
-              { rollNo: '03', name: 'Devendra Patel', status: 'A', confidence: '95%' },
-              { rollNo: '04', name: 'Diya Sen', status: 'P', confidence: '97%' },
-              { rollNo: '05', name: 'Ishaan Reddy', status: 'A', confidence: '94%' },
-              { rollNo: '06', name: 'Kavya Nair', status: 'P', confidence: '99%' },
-              { rollNo: '07', name: 'Manish Kumar', status: 'P', confidence: '96%' },
-              { rollNo: '08', name: 'Meera Iyer', status: 'P', confidence: '98%' },
-              { rollNo: '09', name: 'Rohan Joshi', status: 'P', confidence: '92%' },
-              { rollNo: '10', name: 'Tanvi Deshmukh', status: 'P', confidence: '97%' }
-            ]
-          }
-        });
-      }
-
-      // Default mock for marksheet / answer sheet
-      return NextResponse.json({
-        success: true,
-        mock: true,
-        data: {
-          sheetType: 'Paper Exam Marksheet / Booklet Cover',
-          subject: subject,
-          maxMarks: 25,
-          totalScanned: 8,
-          arithmeticChecks: [
-            {
-              rollNo: '03',
-              name: 'Devendra Patel',
-              flag: 'Arithmetic Check',
-              note: 'Teacher wrote 14, but question breakdown sums to 15. Automatically corrected to 15.'
-            }
-          ],
-          records: [
-            { rollNo: '01', name: 'Aakash Verma', mark: 22, confidence: '98%', questions: [4.5, 4.5, 5, 4, 4] },
-            { rollNo: '02', name: 'Ananya Gupta', mark: 25, confidence: '99%', questions: [5, 5, 5, 5, 5] },
-            { rollNo: '03', name: 'Devendra Patel', mark: 15, confidence: '94%', questions: [3, 3, 4, 2, 3], correctedFrom: 14 },
-            { rollNo: '04', name: 'Diya Sen', mark: 24, confidence: '97%', questions: [5, 5, 4, 5, 5] },
-            { rollNo: '05', name: 'Ishaan Reddy', mark: 14, confidence: '95%', questions: [2.5, 3, 3.5, 2, 3] },
-            { rollNo: '06', name: 'Kavya Nair', mark: 23, confidence: '99%', questions: [5, 4.5, 4.5, 4, 5] },
-            { rollNo: '07', name: 'Manish Kumar', mark: 19, confidence: '96%', questions: [4, 4, 3, 4, 4] },
-            { rollNo: '08', name: 'Meera Iyer', mark: 25, confidence: '99%', questions: [5, 5, 5, 5, 5] }
-          ]
-        }
-      });
-    }
-
     if (!imageBase64) {
-      return NextResponse.json({ error: 'No image provided' }, { status: 400 });
+      return NextResponse.json({ error: 'No image provided. Please capture or upload a photo.' }, { status: 400 });
     }
 
-    const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '');
+    // Extract real MIME type (jpeg, png, webp)
+    const mimeMatch = imageBase64.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,/);
+    const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+    const base64Data = imageBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '');
 
+    // Token-efficient, concise instructions for Gemini Vision
     const prompt = mode === 'attendance'
-      ? `You are an expert school register OCR assistant.
-Analyze this photo of a handwritten attendance register.
-Extract the roll numbers and attendance status (P for Present, A for Absent).
-Return strictly JSON format:
+      ? `You are an OCR assistant for school registers. Extract student roll numbers and attendance status from this photo.
+Return strictly valid JSON with no markdown formatting:
 {
   "sheetType": "Handwritten Attendance Register",
   "records": [
-    { "rollNo": "01", "name": "string", "status": "P" or "A", "confidence": "98%" }
+    { "rollNo": "01", "name": "Student Name", "status": "P", "confidence": "98%" }
   ]
-}`
-      : `You are an expert school marksheet OCR assistant.
-Analyze this photo of a handwritten marksheet or exam answer booklet cover for subject: "${subject}".
-Extract:
-1. Roll numbers and student names
-2. Marks scored per student
-3. Any arithmetic discrepancies where question sums differ from written totals.
-
-Return strictly JSON format:
+}
+Use status "P" for Present and "A" for Absent. If name is unclear, provide the roll number.`
+      : `You are an OCR assistant for school exam answer sheets. Extract roll numbers and marks for subject: "${subject}" (Max Marks: 25).
+Also verify if question-wise marks sum up to the total score.
+Return strictly valid JSON with no markdown formatting:
 {
   "sheetType": "Exam Marksheet",
   "subject": "${subject}",
   "records": [
-    { "rollNo": "01", "name": "string", "mark": 21, "confidence": "97%" }
-  ]
+    { "rollNo": "01", "name": "Student Name", "mark": 21, "confidence": "97%" }
+  ],
+  "arithmeticChecks": []
 }`;
 
+    // Call Gemini 2.0 Flash (fastest, lowest token usage)
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
       {
@@ -111,7 +52,7 @@ Return strictly JSON format:
                 { text: prompt },
                 {
                   inlineData: {
-                    mimeType: 'image/jpeg',
+                    mimeType: mimeType,
                     data: base64Data
                   }
                 }
@@ -120,7 +61,8 @@ Return strictly JSON format:
           ],
           generationConfig: {
             responseMimeType: 'application/json',
-            temperature: 0.1
+            temperature: 0.1,
+            maxOutputTokens: 1024
           }
         })
       }
@@ -128,12 +70,53 @@ Return strictly JSON format:
 
     if (!response.ok) {
       const errText = await response.text();
-      return NextResponse.json({ error: `Gemini API error: ${errText}` }, { status: response.status });
+      console.warn('Gemini 2.0 Flash call failed, falling back to Gemini 1.5 Flash:', errText);
+      
+      // Fallback to gemini-1.5-flash
+      const fallbackRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  { text: prompt },
+                  {
+                    inlineData: {
+                      mimeType: mimeType,
+                      data: base64Data
+                    }
+                  }
+                ]
+              }
+            ],
+            generationConfig: {
+              responseMimeType: 'application/json',
+              temperature: 0.1,
+              maxOutputTokens: 1024
+            }
+          })
+        }
+      );
+
+      if (!fallbackRes.ok) {
+        const fallbackErr = await fallbackRes.text();
+        return NextResponse.json({ error: `AI Vision Error: ${fallbackErr}` }, { status: fallbackRes.status });
+      }
+
+      const fbResult = await fallbackRes.json();
+      const fbCandidateText = fbResult.candidates?.[0]?.content?.parts?.[0]?.text;
+      const cleanJson = (fbCandidateText || '{}').replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+      const parsedData = JSON.parse(cleanJson);
+      return NextResponse.json({ success: true, data: parsedData });
     }
 
     const result = await response.json();
     const candidateText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-    const parsedData = JSON.parse(candidateText || '{}');
+    const cleanJson = (candidateText || '{}').replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+    const parsedData = JSON.parse(cleanJson);
 
     return NextResponse.json({
       success: true,
