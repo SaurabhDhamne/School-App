@@ -14,6 +14,7 @@ import {
   Sparkles,
   BarChart2
 } from 'lucide-react';
+import HomeworkSection from '@/components/HomeworkSection';
 
 export default function DashboardTab({
   currentUser,
@@ -23,7 +24,8 @@ export default function DashboardTab({
   onOpenEmailAll,
   calculateTotal,
   calculatePercentage,
-  getGrade
+  getGrade,
+  showToast
 }) {
   const totalStudents = students.length;
   const presentCount = students.filter(s => s.attendance === 'P').length;
@@ -57,7 +59,7 @@ export default function DashboardTab({
               {currentUser?.classTeacherOf || 'Class 8-A'} Academic Overview
             </h2>
             <p className="text-xs sm:text-sm text-indigo-200/80 max-w-xl">
-              Track attendance, review multi-subject unit test grades, and scan paper registers with Gemini AI vision.
+              Track attendance, review multi-subject unit test grades, and scan paper registers with AI vision.
             </p>
           </div>
 
@@ -188,6 +190,9 @@ export default function DashboardTab({
 
       </div>
 
+      {/* NEW: CLASS HOMEWORK & NOTICE BOARD */}
+      <HomeworkSection currentUser={currentUser} showToast={showToast} />
+
       {/* Bottom Insights: Top Students & Attention Needed */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
@@ -272,4 +277,3 @@ export default function DashboardTab({
     </div>
   );
 }
-

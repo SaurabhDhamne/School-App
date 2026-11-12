@@ -31,12 +31,9 @@ export default function Navbar({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-lg font-black tracking-tight text-slate-900">EduSnap</h1>
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200/60">
-                  AI ASSISTANT
-                </span>
+                <h1 className="text-lg font-black tracking-tight text-slate-900">MySchool</h1>
               </div>
-              <p className="text-[11px] text-slate-400 font-medium">{currentUser?.school || "MySchool"}</p>
+              <p className="text-[11px] text-slate-400 font-medium">Class 8-A Teacher Portal</p>
             </div>
           </div>
 

@@ -53,6 +53,34 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
+  // Helper to match a record to an existing student by either roll number OR name
+  const findMatchingStudent = (list, item) => {
+    if (!item || !list) return null;
+
+    // 1. Match by roll number (handling '1' vs '01')
+    if (item.rollNo !== undefined && item.rollNo !== null) {
+      const targetRoll = String(item.rollNo).trim();
+      const targetNum = parseInt(targetRoll, 10);
+      const byRoll = list.find(s => {
+        const sNum = parseInt(s.rollNo, 10);
+        return s.rollNo === targetRoll || (!isNaN(targetNum) && !isNaN(sNum) && sNum === targetNum);
+      });
+      if (byRoll) return byRoll;
+    }
+
+    // 2. Match by student name (case-insensitive substring)
+    if (item.name && item.name.trim().length > 1) {
+      const targetName = item.name.toLowerCase().trim();
+      const byName = list.find(s => {
+        const sName = s.name.toLowerCase().trim();
+        return sName === targetName || sName.includes(targetName) || targetName.includes(sName);
+      });
+      if (byName) return byName;
+    }
+
+    return null;
+  };
+
   // Initial load
   useEffect(() => {
     const savedUser = localStorage.getItem('edusnap_user');
@@ -64,19 +92,6 @@ export default function App() {
       } catch (e) {
         console.error(e);
       }
-    } else {
-      // Default to Class Teacher Mrs. Priya Sharma
-      const defaultTeacher = {
-        id: 't1',
-        name: 'Mrs. Priya Sharma',
-        email: 'priya@myschool.com',
-        role: 'class_teacher',
-        classTeacherOf: 'Class 8-A',
-        subject: 'Mathematics',
-        school: 'MySchool'
-      };
-      setCurrentUser(defaultTeacher);
-      localStorage.setItem('edusnap_user', JSON.stringify(defaultTeacher));
     }
 
     fetchStudents();
@@ -108,7 +123,6 @@ export default function App() {
     setCurrentUser(null);
     localStorage.removeItem('edusnap_user');
     setActiveTab('home');
-    setIsAuthModalOpen(true);
     showToast('Signed out successfully');
   };
 
@@ -155,7 +169,6 @@ export default function App() {
 
   // Update Marks with Role Permission Enforcement
   const updateSubjectMark = async (rollNo, subjectKey, val) => {
-    // Permission check
     if (currentUser?.role === 'subject_teacher') {
       const userSub = (currentUser.subject || '').toLowerCase();
       let match = userSub === subjectKey.toLowerCase();
@@ -201,53 +214,77 @@ export default function App() {
     }
   };
 
-  // Apply OCR Data
+  // Apply OCR Data with Smart Roll No or Name Matching
   const handleApplyAiData = async (type, subject, data) => {
     if (!data || !data.records) return;
 
     if (type === 'marksheet') {
-      const updates = data.records.map(r => ({
-        rollNo: r.rollNo,
-        subject,
-        mark: r.mark
-      }));
+      const records = data.records;
+      const updates = [];
 
-      setStudents(prev => prev.map(s => {
-        const match = updates.find(u => u.rollNo === s.rollNo);
-        if (match) {
-          return { ...s, marks: { ...s.marks, [subject]: match.mark } };
-        }
-        return s;
-      }));
+      setStudents(prev => {
+        return prev.map(s => {
+          // Find matching record by roll number OR name
+          const matchedRecord = records.find(r => findMatchingStudent([s], r) !== null);
 
-      await fetch('/api/students', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'apply_ocr_marks', updates })
+          if (matchedRecord && matchedRecord.mark !== undefined) {
+            updates.push({
+              rollNo: s.rollNo,
+              subject,
+              mark: matchedRecord.mark
+            });
+            return {
+              ...s,
+              marks: {
+                ...s.marks,
+                [subject]: Number(matchedRecord.mark)
+              }
+            };
+          }
+          return s;
+        });
       });
 
-      showToast(`✅ Successfully applied AI marks to ${updates.length} students!`);
+      if (updates.length > 0) {
+        await fetch('/api/students', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'apply_ocr_marks', updates })
+        });
+        showToast(`✅ Matched & updated marks for ${updates.length} students!`);
+      } else {
+        showToast('⚠️ No student roll numbers or names matched in class roster.');
+      }
     } else {
-      const updates = data.records.map(r => ({
-        rollNo: r.rollNo,
-        status: r.status
-      }));
+      const records = data.records;
+      const updates = [];
 
-      setStudents(prev => prev.map(s => {
-        const match = updates.find(u => u.rollNo === s.rollNo);
-        if (match) {
-          return { ...s, attendance: match.status };
-        }
-        return s;
-      }));
+      setStudents(prev => {
+        return prev.map(s => {
+          const matchedRecord = records.find(r => findMatchingStudent([s], r) !== null);
 
-      await fetch('/api/students', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'apply_ocr_attendance', updates })
+          if (matchedRecord && matchedRecord.status) {
+            updates.push({
+              rollNo: s.rollNo,
+              status: matchedRecord.status
+            });
+            return {
+              ...s,
+              attendance: matchedRecord.status
+            };
+          }
+          return s;
+        });
       });
 
-      showToast(`✅ Successfully applied AI attendance to ${updates.length} students!`);
+      if (updates.length > 0) {
+        await fetch('/api/students', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'apply_ocr_attendance', updates })
+        });
+        showToast(`✅ Matched & updated attendance for ${updates.length} students!`);
+      }
     }
   };
 
@@ -311,7 +348,7 @@ export default function App() {
     showToast("📥 Downloaded Sample Excel Template!");
   };
 
-  // Universal Excel & CSV Import (supports .xlsx, .xls, .csv)
+  // Universal Excel & CSV Import (supports .xlsx, .xls, .csv with Roll No or Name Matching)
   const handleExcelImport = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -331,26 +368,26 @@ export default function App() {
         }
 
         const imported = jsonRows.map((row, idx) => {
-          // Normalize column names
-          const roll = String(row['Roll No'] || row['Roll'] || row['rollNo'] || row['roll'] || (idx + 1)).padStart(2, '0');
-          const name = row['Student Name'] || row['Name'] || row['name'] || `Student ${roll}`;
-          const parentEmail = row['Parent Email'] || row['Email'] || row['email'] || '';
-          const parentPhone = row['Parent Phone'] || row['Phone'] || row['phone'] || '';
+          const rawRoll = String(row['Roll No'] || row['Roll'] || row['rollNo'] || row['roll'] || (idx + 1)).padStart(2, '0');
+          const rawName = String(row['Student Name'] || row['Name'] || row['name'] || `Student ${rawRoll}`).trim();
+
+          // Match existing student by roll or name
+          const existing = findMatchingStudent(students, { rollNo: rawRoll, name: rawName });
 
           return {
-            rollNo: roll,
-            name,
-            className: 'Class 8-A',
-            parentEmail,
-            parentPhone: String(parentPhone),
-            attendance: 'P',
+            rollNo: existing ? existing.rollNo : rawRoll,
+            name: existing ? existing.name : rawName,
+            className: existing?.className || 'Class 8-A',
+            parentEmail: row['Parent Email'] || row['Email'] || existing?.parentEmail || '',
+            parentPhone: String(row['Parent Phone'] || row['Phone'] || existing?.parentPhone || ''),
+            attendance: existing?.attendance || 'P',
             emailed: false,
             marks: {
-              maths: Number(row['Maths'] || row['Mathematics'] || row['maths']) || 0,
-              science: Number(row['Science'] || row['science']) || 0,
-              english: Number(row['English'] || row['english']) || 0,
-              social: Number(row['Social'] || row['Social Studies'] || row['social']) || 0,
-              hindi: Number(row['Hindi'] || row['hindi']) || 0,
+              maths: Number(row['Maths'] || row['Mathematics'] || row['maths'] || existing?.marks?.maths || 0),
+              science: Number(row['Science'] || row['science'] || existing?.marks?.science || 0),
+              english: Number(row['English'] || row['english'] || existing?.marks?.english || 0),
+              social: Number(row['Social'] || row['Social Studies'] || row['social'] || existing?.marks?.social || 0),
+              hindi: Number(row['Hindi'] || row['hindi'] || existing?.marks?.hindi || 0),
             }
           };
         });
@@ -362,14 +399,14 @@ export default function App() {
           body: JSON.stringify({ action: 'bulk_replace', students: imported })
         });
 
-        showToast(`✅ Successfully imported ${imported.length} student marks from Excel!`);
+        showToast(`✅ Successfully matched and imported ${imported.length} student marks!`);
       } catch (err) {
         console.error('Excel parse error:', err);
         showToast("⚠️ Failed to parse Excel file. Please use the template.");
       }
     };
     reader.readAsArrayBuffer(file);
-    e.target.value = ''; // Reset input
+    e.target.value = '';
   };
 
   // Single Email Composer
@@ -427,6 +464,23 @@ export default function App() {
     }
   };
 
+  // ==============================================================
+  // LOGIN PAGE GATE: ACCESS IS LOCKED UNTIL USER LOGS IN!
+  // ==============================================================
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-[#F6F7FB]">
+        <Toast message={toastMessage} />
+        <AuthModal 
+          isOpen={true}
+          isGatePage={true}
+          onLoginSuccess={handleLoginSuccess}
+          showToast={showToast}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#F6F7FB] flex flex-col text-slate-800">
       
@@ -463,6 +517,7 @@ export default function App() {
             calculateTotal={calculateStudentTotal}
             calculatePercentage={calculateStudentPercentage}
             getGrade={getStudentGrade}
+            showToast={showToast}
           />
         )}
 
@@ -518,7 +573,7 @@ export default function App() {
         showToast={showToast}
       />
 
-      {/* Auth / Login Modal (Shown when not logged in or switching after sign out) */}
+      {/* Auth / Login Modal */}
       <AuthModal 
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}

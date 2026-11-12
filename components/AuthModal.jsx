@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Lock, Mail, ShieldCheck, ArrowRight, UserCheck, ChevronDown, Sparkles } from 'lucide-react';
+import { Lock, Mail, ShieldCheck, ArrowRight, UserCheck, ChevronDown, Sparkles, X, School } from 'lucide-react';
 
-export default function AuthModal({ isOpen, onClose, onLoginSuccess, showToast }) {
+export default function AuthModal({ isOpen, onClose, onLoginSuccess, showToast, isGatePage = false }) {
   // Mode: 'teacher' | 'admin'
   const [loginMode, setLoginMode] = useState('teacher');
   
@@ -42,13 +42,6 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, showToast }
 
   const selectedTeacher = teachers.find(t => t.id === selectedTeacherId);
 
-  // Calculate default password preview
-  const getDefaultPassHint = (name = '') => {
-    const clean = name.replace(/^(mrs\.|mr\.|dr\.|ms\.|prof\.)\s+/i, '').trim();
-    const first = clean.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
-    return `${first || 'teacher'}@123`;
-  };
-
   const handleTeacherLogin = async (e) => {
     e.preventDefault();
     if (!selectedTeacherId) {
@@ -72,7 +65,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, showToast }
       if (data.success && data.user) {
         onLoginSuccess(data.user);
         showToast(`🎉 Welcome back, ${data.user.name}!`);
-        onClose();
+        if (onClose) onClose();
       } else {
         showToast(`⚠️ ${data.error || 'Invalid password'}`);
       }
@@ -101,7 +94,7 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, showToast }
       if (data.success && data.user) {
         onLoginSuccess(data.user);
         showToast(`🛡️ Logged in as School Administrator`);
-        onClose();
+        if (onClose) onClose();
       } else {
         showToast(`⚠️ ${data.error || 'Invalid admin credentials'}`);
       }
@@ -112,31 +105,41 @@ export default function AuthModal({ isOpen, onClose, onLoginSuccess, showToast }
     }
   };
 
+  const containerClasses = isGatePage
+    ? "min-h-screen bg-[#F6F7FB] flex items-center justify-center p-4"
+    : "fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150";
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
-      <div className="bg-white w-full max-w-md rounded-3xl p-6 sm:p-7 shadow-2xl border border-slate-100 flex flex-col gap-5">
+    <div className={containerClasses}>
+      <div className="bg-white w-full max-w-md rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-100 flex flex-col gap-5">
         
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-100 pb-4">
           <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center ${loginMode === 'admin' ? 'bg-amber-50 text-amber-600 border border-amber-200' : 'bg-indigo-50 text-indigo-600 border border-indigo-100'}`}>
-              {loginMode === 'admin' ? <ShieldCheck className="w-5 h-5" /> : <UserCheck className="w-5 h-5" />}
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${loginMode === 'admin' ? 'bg-amber-50 text-amber-600 border border-amber-200' : 'bg-indigo-50 text-indigo-600 border border-indigo-100'}`}>
+              {loginMode === 'admin' ? <ShieldCheck className="w-6 h-6" /> : <UserCheck className="w-6 h-6" />}
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-800">
-                {loginMode === 'admin' ? 'School Administrator Login' : 'Teacher Portal Login'}
-              </h3>
+              <div className="flex items-center gap-1.5">
+                <h2 className="text-lg font-black tracking-tight text-slate-900">MySchool</h2>
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-600">
+                  PORTAL
+                </span>
+              </div>
               <p className="text-xs text-slate-400">
-                {loginMode === 'admin' ? 'Full school & roster control' : 'Select your name from staff list'}
+                {loginMode === 'admin' ? 'School Administrator Login' : 'Teacher Access Gate'}
               </p>
             </div>
           </div>
-          <button 
-            onClick={onClose}
-            className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+
+          {!isGatePage && onClose && (
+            <button 
+              onClick={onClose}
+              className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Mode Switcher Tabs */}

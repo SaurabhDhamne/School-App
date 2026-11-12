@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 
+export async function GET() {
+  return NextResponse.json({ success: true, status: 'OCR Vision API operational' });
+}
+
 export async function POST(request) {
   try {
-    const body = await request.json();
+    const body = await request.json().catch(() => ({}));
     const { imageBase64, mode = 'marksheet', subject = 'maths', apiKey: userApiKey } = body;
 
     const apiKey = userApiKey || process.env.GEMINI_API_KEY;
@@ -26,7 +30,7 @@ Return strictly valid JSON with no markdown formatting:
     { "rollNo": "01", "name": "Student Name", "status": "P", "confidence": "98%" }
   ]
 }
-Use status "P" for Present and "A" for Absent. If name is unclear, provide the roll number.`
+Use status "P" for Present and "A" for Absent. If name is unclear, match by roll number.`
       : `You are an OCR assistant for school exam answer sheets. Extract roll numbers and marks for subject: "${subject}" (Max Marks: 25).
 Also verify if question-wise marks sum up to the total score.
 Return strictly valid JSON with no markdown formatting:
