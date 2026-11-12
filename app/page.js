@@ -532,6 +532,7 @@ export default function App() {
         initialType={scanInitialType}
         students={students}
         onApplyData={handleApplyAiData}
+        currentUser={currentUser}
         showToast={showToast}
       />
 

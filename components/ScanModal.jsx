@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Camera, 
   Upload, 
@@ -11,7 +11,8 @@ import {
   RefreshCw, 
   Check, 
   Layers, 
-  FileText 
+  FileText,
+  Lock
 } from 'lucide-react';
 
 export default function ScanModal({
@@ -20,16 +21,44 @@ export default function ScanModal({
   initialType = 'marksheet',
   students,
   onApplyData,
+  currentUser,
   showToast
 }) {
+  const isSubjectTeacher = currentUser?.role === 'subject_teacher';
+
+  const getTeacherSubjectKey = () => {
+    const s = (currentUser?.subject || '').toLowerCase();
+    if (s.includes('science')) return 'science';
+    if (s.includes('math')) return 'maths';
+    if (s.includes('english')) return 'english';
+    if (s.includes('social')) return 'social';
+    if (s.includes('hindi')) return 'hindi';
+    return 'maths';
+  };
+
+  const defaultSub = isSubjectTeacher ? getTeacherSubjectKey() : 'maths';
+
   const [scanType, setScanType] = useState(initialType);
-  const [scanSubject, setScanSubject] = useState('maths');
+  const [scanSubject, setScanSubject] = useState(defaultSub);
   const [previewImage, setPreviewImage] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [extractedData, setExtractedData] = useState(null);
+  const [scanError, setScanError] = useState(null);
 
   const fileInputRef = useRef(null);
   const cameraInputRef = useRef(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setScanType(initialType);
+      if (isSubjectTeacher) {
+        setScanSubject(getTeacherSubjectKey());
+      }
+      setScanError(null);
+      setExtractedData(null);
+      setPreviewImage(null);
+    }
+  }, [isOpen, initialType, currentUser]);
 
   if (!isOpen) return null;
 
@@ -43,6 +72,7 @@ export default function ScanModal({
 
   const handleImageSelected = (file) => {
     if (!file) return;
+    setScanError(null);
     const reader = new FileReader();
     reader.onload = (e) => {
       const base64 = e.target.result;
@@ -54,6 +84,7 @@ export default function ScanModal({
 
   const runAiOcr = async (base64) => {
     setIsAnalyzing(true);
+    setScanError(null);
     try {
       const res = await fetch('/api/ocr', {
         method: 'POST',
@@ -68,12 +99,16 @@ export default function ScanModal({
       const json = await res.json();
       if (json.success && json.data) {
         setExtractedData(json.data);
-        showToast('✨ Gemini AI extracted paper records successfully!');
+        showToast('✨ AI extracted paper records successfully!');
       } else {
-        showToast(`⚠️ AI OCR: ${json.error || 'Failed to process'}`);
+        const errMsg = json.error || 'Failed to extract handwriting. Please ensure photo is clear and well-lit.';
+        setScanError(errMsg);
+        showToast(`⚠️ ${errMsg}`);
       }
     } catch (err) {
-      showToast('⚠️ AI Vision service error');
+      const errMsg = 'AI Vision service is temporarily unavailable. Please retry.';
+      setScanError(errMsg);
+      showToast(`⚠️ ${errMsg}`);
     } finally {
       setIsAnalyzing(false);
     }
@@ -115,8 +150,8 @@ export default function ScanModal({
             <div>
               <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
                 <span>AI Vision Paper Scanner</span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  Gemini 2.0 Flash
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                  Instant Digitization
                 </span>
               </h3>
               <p className="text-xs text-slate-400">Digitize handwritten registers or exam answer booklets</p>
@@ -130,11 +165,11 @@ export default function ScanModal({
           </button>
         </div>
 
-        {/* Scan Type & Subject Picker */}
+        {/* Scan Type Picker */}
         <div className="grid grid-cols-2 gap-2">
           <button
             type="button"
-            onClick={() => { setScanType('marksheet'); setExtractedData(null); }}
+            onClick={() => { setScanType('marksheet'); setExtractedData(null); setScanError(null); }}
             className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
               scanType === 'marksheet'
                 ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
@@ -145,7 +180,7 @@ export default function ScanModal({
           </button>
           <button
             type="button"
-            onClick={() => { setScanType('attendance'); setExtractedData(null); }}
+            onClick={() => { setScanType('attendance'); setExtractedData(null); setScanError(null); }}
             className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
               scanType === 'attendance'
                 ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
@@ -156,18 +191,46 @@ export default function ScanModal({
           </button>
         </div>
 
+        {/* Subject Picker with STRICT TEACHER RESTRICTION */}
         {scanType === 'marksheet' && (
           <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
             <span className="text-xs font-medium text-slate-500 whitespace-nowrap">Subject:</span>
-            <select
-              value={scanSubject}
-              onChange={(e) => setScanSubject(e.target.value)}
-              className="bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 px-2.5 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full"
+            {isSubjectTeacher ? (
+              <div className="flex items-center justify-between w-full px-2 py-1 bg-white border border-indigo-200 rounded-lg text-xs font-bold text-indigo-900">
+                <span className="capitalize">{currentUser.subject}</span>
+                <span className="text-[10px] font-semibold text-indigo-600 flex items-center gap-1">
+                  <Lock className="w-3 h-3" />
+                  <span>Locked to your subject</span>
+                </span>
+              </div>
+            ) : (
+              <select
+                value={scanSubject}
+                onChange={(e) => setScanSubject(e.target.value)}
+                className="bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 px-2.5 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full"
+              >
+                {subjects.map(s => (
+                  <option key={s.key} value={s.key}>{s.label}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
+
+        {/* VISIBLE IN-MODAL ERROR MESSAGE (NO MORE BACKGROUND HIDDEN ERRORS) */}
+        {scanError && (
+          <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2.5 animate-in fade-in duration-200">
+            <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="font-bold">Scan Error</p>
+              <p className="text-[11px] text-rose-700 mt-0.5 leading-relaxed">{scanError}</p>
+            </div>
+            <button
+              onClick={() => setScanError(null)}
+              className="text-rose-400 hover:text-rose-700 p-1"
             >
-              {subjects.map(s => (
-                <option key={s.key} value={s.key}>{s.label}</option>
-              ))}
-            </select>
+              <X className="w-4 h-4" />
+            </button>
           </div>
         )}
 
@@ -203,8 +266,9 @@ export default function ScanModal({
             <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 max-h-48 flex items-center justify-center">
               <img src={previewImage} alt="Scan Preview" className="object-contain max-h-48 w-full" />
               <button
-                onClick={() => { setPreviewImage(null); setExtractedData(null); }}
+                onClick={() => { setPreviewImage(null); setExtractedData(null); setScanError(null); }}
                 className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors"
+                title="Remove photo and snap another"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -213,7 +277,7 @@ export default function ScanModal({
             {isAnalyzing && (
               <div className="flex items-center justify-center gap-2 py-4 text-xs font-bold text-indigo-600 animate-pulse">
                 <RefreshCw className="w-4 h-4 animate-spin" />
-                <span>Gemini Vision AI is analyzing handwritten entries...</span>
+                <span>AI Vision is analyzing handwriting...</span>
               </div>
             )}
           </div>
@@ -283,4 +347,3 @@ export default function ScanModal({
     </div>
   );
 }
-
