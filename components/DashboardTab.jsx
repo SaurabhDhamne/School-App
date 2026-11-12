@@ -190,8 +190,13 @@ export default function DashboardTab({
 
       </div>
 
-      {/* NEW: CLASS HOMEWORK & NOTICE BOARD */}
-      <HomeworkSection currentUser={currentUser} showToast={showToast} />
+      {/* CLASS HOMEWORK & NOTICE BOARD */}
+      <HomeworkSection 
+        currentUser={currentUser} 
+        showToast={showToast} 
+        isFullPage={false}
+        onNavigateToHomework={() => onNavigate('homework')}
+      />
 
       {/* Bottom Insights: Top Students & Attention Needed */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

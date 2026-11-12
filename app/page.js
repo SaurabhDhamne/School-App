@@ -14,6 +14,7 @@ import StudentDetailModal from '@/components/StudentDetailModal';
 import EmailModal from '@/components/EmailModal';
 import AuthModal from '@/components/AuthModal';
 import ProfileModal from '@/components/ProfileModal';
+import HomeworkSection from '@/components/HomeworkSection';
 
 export default function App() {
   // Navigation: 'home' | 'attendance' | 'marksheet' | 'admin'
@@ -551,6 +552,14 @@ export default function App() {
             calculateTotal={calculateStudentTotal}
             calculatePercentage={calculateStudentPercentage}
             getGrade={getStudentGrade}
+          />
+        )}
+
+        {activeTab === 'homework' && (
+          <HomeworkSection 
+            currentUser={currentUser} 
+            showToast={showToast} 
+            isFullPage={true} 
           />
         )}
 

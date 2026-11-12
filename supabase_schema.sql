@@ -58,13 +58,27 @@ CREATE TABLE public.marks (
   CONSTRAINT unique_student_subject_exam UNIQUE (student_id, subject, exam)
 );
 
+-- 7. Create HOMEWORK Table (For Class Homework & Parent Notices)
+CREATE TABLE IF NOT EXISTS public.homework (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subject TEXT NOT NULL,
+  teacher_name TEXT NOT NULL,
+  message TEXT NOT NULL,
+  link TEXT,
+  image_url TEXT,
+  has_deadline BOOLEAN DEFAULT false,
+  deadline_date DATE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
+);
+
 -- ==============================================================
--- 7. ROW LEVEL SECURITY (RLS) POLICIES
+-- 8. ROW LEVEL SECURITY (RLS) POLICIES
 -- ==============================================================
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.marks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.homework ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow public read profiles" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Allow public modify profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
@@ -72,6 +86,7 @@ CREATE POLICY "Allow public modify profiles" ON public.profiles FOR ALL USING (t
 CREATE POLICY "Allow all access to students" ON public.students FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all access to attendance" ON public.attendance FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all access to marks" ON public.marks FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all access to homework" ON public.homework FOR ALL USING (true) WITH CHECK (true);
 
 -- ==============================================================
 -- 8. SEED DATA: 1 ADMIN + EXACTLY 3 TEACHERS (MySchool)

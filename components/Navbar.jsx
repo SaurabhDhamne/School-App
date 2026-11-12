@@ -6,6 +6,7 @@ import {
   Home as HomeIcon, 
   Calendar, 
   FileSpreadsheet, 
+  BookOpen,
   LogIn, 
   ShieldCheck 
 } from 'lucide-react';
@@ -73,6 +74,18 @@ export default function Navbar({
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
               <span>Marksheet</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('homework')}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'homework'
+                  ? 'bg-white text-indigo-700 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Homework</span>
             </button>
 
             {/* Admin Panel Tab (Only when logged in as Admin) */}
@@ -157,7 +170,15 @@ export default function Navbar({
             activeTab === 'marksheet' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-500'
           }`}
         >
-          Marksheet
+          Marks
+        </button>
+        <button
+          onClick={() => setActiveTab('homework')}
+          className={`flex-1 py-1.5 rounded-xl text-xs font-semibold text-center transition-all ${
+            activeTab === 'homework' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-500'
+          }`}
+        >
+          Homework
         </button>
         {isAdmin && (
           <button
