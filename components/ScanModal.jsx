@@ -129,7 +129,7 @@ export default function ScanModal({
           type="file" 
           ref={fileInputRef} 
           onChange={(e) => handleImageSelected(e.target.files?.[0])}
-          accept="image/*" 
+          accept="image/*,application/pdf" 
           className="hidden" 
         />
         <input 
@@ -257,18 +257,28 @@ export default function ScanModal({
               <div className="w-12 h-12 rounded-full bg-white shadow-sm flex items-center justify-center text-slate-600">
                 <Upload className="w-6 h-6" />
               </div>
-              <p className="text-xs font-bold">Upload Image / File</p>
-              <p className="text-[10px] text-slate-400">JPG, PNG, or photo scan</p>
+              <p className="text-xs font-bold">Upload Photo / PDF</p>
+              <p className="text-[10px] text-slate-400">JPG, PNG, or PDF marksheet</p>
             </button>
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-            <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 max-h-48 flex items-center justify-center">
-              <img src={previewImage} alt="Scan Preview" className="object-contain max-h-48 w-full" />
+            <div className="relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-900 max-h-48 flex items-center justify-center p-2">
+              {previewImage.startsWith('data:application/pdf') ? (
+                <div className="flex flex-col items-center justify-center py-6 text-white gap-2">
+                  <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center border border-rose-500/30">
+                    <FileText className="w-6 h-6" />
+                  </div>
+                  <span className="text-xs font-bold">PDF Marksheet Document Loaded</span>
+                  <span className="text-[10px] text-slate-400">Analyzing document pages...</span>
+                </div>
+              ) : (
+                <img src={previewImage} alt="Scan Preview" className="object-contain max-h-48 w-full" />
+              )}
               <button
                 onClick={() => { setPreviewImage(null); setExtractedData(null); setScanError(null); }}
                 className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-white hover:bg-black/80 transition-colors"
-                title="Remove photo and snap another"
+                title="Remove and snap another"
               >
                 <X className="w-4 h-4" />
               </button>

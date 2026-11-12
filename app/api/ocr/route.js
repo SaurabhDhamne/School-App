@@ -25,14 +25,14 @@ export async function POST(request) {
       return NextResponse.json({ error: 'No image provided. Please capture or upload a photo.' }, { status: 400 });
     }
 
-    // Extract real MIME type (jpeg, png, webp, etc.)
-    const mimeMatch = imageBase64.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,/);
+    // Extract real MIME type (jpeg, png, webp, pdf, etc.)
+    const mimeMatch = imageBase64.match(/^data:([a-zA-Z0-9+.-]+\/[a-zA-Z0-9+.-]+);base64,/);
     const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-    const base64Data = imageBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, '').trim();
+    const base64Data = imageBase64.replace(/^data:[a-zA-Z0-9+.-]+\/[a-zA-Z0-9+.-]+;base64,/, '').trim();
 
     // Token-efficient, concise instructions for Gemini Vision
     const prompt = mode === 'attendance'
-      ? `You are an OCR assistant for school registers. Extract student roll numbers and attendance status from this photo.
+      ? `You are an OCR assistant for school registers. Extract student roll numbers and attendance status from this photo or PDF document.
 Return strictly valid JSON with no markdown formatting:
 {
   "sheetType": "Handwritten Attendance Register",

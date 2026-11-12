@@ -8,6 +8,9 @@ import {
   Clock, 
   Link as LinkIcon, 
   Image as ImageIcon, 
+  FileText,
+  File,
+  Eye,
   X, 
   Trash2, 
   Send, 
@@ -30,8 +33,14 @@ const INITIAL_DEFAULT_POSTS = [
     subject: 'Mathematics',
     teacherName: 'Mrs. Priya Sharma',
     teacherRole: 'class_teacher',
-    message: 'Complete Exercise 4.2 (Questions 1 to 8) on Linear Equations in your class notebook.',
+    message: 'Complete Exercise 4.2 (Questions 1 to 8) on Linear Equations. Refer to the attached PDF worksheet for extra practice.',
     link: 'https://myschool.edu/resources/maths-ch4',
+    attachment: {
+      type: 'pdf',
+      name: 'Class8_Maths_LinearEquations_Practice.pdf',
+      size: '245 KB',
+      url: null
+    },
     imageUrl: null,
     postedAt: '12 Nov 2026, 09:30 AM',
     hasDeadline: true,
@@ -44,12 +53,20 @@ const INITIAL_DEFAULT_POSTS = [
     teacherRole: 'subject_teacher',
     message: 'Read Chapter 6 on Cellular Structure and draw the labeled plant cell diagram in your homework sheet.',
     link: '',
+    attachment: null,
     imageUrl: null,
     postedAt: '11 Nov 2026, 02:15 PM',
     hasDeadline: true,
     deadlineDate: '2026-11-15'
   }
 ];
+
+function formatFileSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
 
 export default function HomeworkSection({ 
   currentUser, 
@@ -60,6 +77,7 @@ export default function HomeworkSection({
   const [homeworkList, setHomeworkList] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null); // For Image Lightbox
+  const [selectedPdf, setSelectedPdf] = useState(null); // For PDF Viewer Modal { url, name }
   const [imageZoom, setImageZoom] = useState(1);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState('All');
@@ -72,7 +90,7 @@ export default function HomeworkSection({
   });
   const [message, setMessage] = useState('');
   const [link, setLink] = useState('');
-  const [imagePreview, setImagePreview] = useState(null);
+  const [attachedFile, setAttachedFile] = useState(null); // { type: 'image' | 'pdf', name: '', size: '', url: '' }
   const [hasDeadline, setHasDeadline] = useState(false);
   const [deadlineDate, setDeadlineDate] = useState(() => {
     const d = new Date();
@@ -82,7 +100,7 @@ export default function HomeworkSection({
 
   const subjects = ['Mathematics', 'Science', 'English', 'Social Studies', 'Hindi', 'General Notice'];
 
-  // Load from persistent localStorage on mount and listen to changes
+  // Load from persistent localStorage on mount
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
@@ -93,7 +111,6 @@ export default function HomeworkSection({
           return;
         }
       }
-      // Initialize with default sample posts if empty
       setHomeworkList(INITIAL_DEFAULT_POSTS);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_DEFAULT_POSTS));
     } catch (e) {
@@ -102,7 +119,7 @@ export default function HomeworkSection({
     }
   }, []);
 
-  // Save to localStorage whenever homeworkList changes
+  // Save to localStorage
   const savePosts = (newList) => {
     setHomeworkList(newList);
     try {
@@ -112,19 +129,26 @@ export default function HomeworkSection({
     }
   };
 
-  const handleImageUpload = (e) => {
+  const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     
-    // Check file size (limit to 4MB for localStorage performance)
-    if (file.size > 4 * 1024 * 1024) {
-      showToast?.('⚠️ Please choose an image smaller than 4MB');
+    // Check file size (limit to 6MB for smooth browser storage)
+    if (file.size > 6 * 1024 * 1024) {
+      showToast?.('⚠️ Please choose a file smaller than 6MB');
       return;
     }
 
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     const reader = new FileReader();
+
     reader.onload = (evt) => {
-      setImagePreview(evt.target.result);
+      setAttachedFile({
+        type: isPdf ? 'pdf' : 'image',
+        name: file.name,
+        size: formatFileSize(file.size),
+        url: evt.target.result
+      });
     };
     reader.readAsDataURL(file);
   };
@@ -147,7 +171,8 @@ export default function HomeworkSection({
       teacherRole: currentUser?.role || 'class_teacher',
       message: message.trim(),
       link: link.trim(),
-      imageUrl: imagePreview,
+      attachment: attachedFile,
+      imageUrl: attachedFile?.type === 'image' ? attachedFile.url : null,
       postedAt: formattedTime,
       hasDeadline,
       deadlineDate: hasDeadline ? deadlineDate : null
@@ -160,7 +185,7 @@ export default function HomeworkSection({
     // Reset form
     setMessage('');
     setLink('');
-    setImagePreview(null);
+    setAttachedFile(null);
     setHasDeadline(false);
     setIsModalOpen(false);
   };
@@ -184,11 +209,9 @@ export default function HomeworkSection({
 
   // Filtered List
   const filteredList = homeworkList.filter(hw => {
-    // Subject filter
     if (selectedSubjectFilter !== 'All' && hw.subject !== selectedSubjectFilter) {
       return false;
     }
-    // Search query
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const matchMsg = hw.message?.toLowerCase().includes(q);
@@ -196,17 +219,15 @@ export default function HomeworkSection({
       const matchTeach = hw.teacherName?.toLowerCase().includes(q);
       if (!matchMsg && !matchSub && !matchTeach) return false;
     }
-    // Deadline filter
     if (deadlineFilter === 'active') return hw.hasDeadline;
     if (deadlineFilter === 'none') return !hw.hasDeadline;
 
     return true;
   });
 
-  // Calculate stats for full page mode
   const totalPosts = homeworkList.length;
   const activeDeadlines = homeworkList.filter(h => h.hasDeadline).length;
-  const withImages = homeworkList.filter(h => !!h.imageUrl).length;
+  const withAttachments = homeworkList.filter(h => !!h.attachment || !!h.imageUrl).length;
 
   return (
     <div className={`flex flex-col gap-5 ${isFullPage ? 'max-w-7xl mx-auto px-4 sm:px-6 py-6' : 'bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-sm'}`}>
@@ -223,11 +244,11 @@ export default function HomeworkSection({
                 {isFullPage ? 'Class Homework & Parent Notice Hub' : 'Class Homework & Notice Board'}
               </h2>
               <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                Visible to All Accounts
+                Photos & PDF Worksheets
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              Post daily homework, worksheets, photos, and links. Parents can view deadlines and download materials.
+              Post daily homework, worksheets (photos or PDF documents), and links. Visible across all teacher & parent views.
             </p>
           </div>
         </div>
@@ -276,13 +297,13 @@ export default function HomeworkSection({
               </div>
             </div>
 
-            <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-100 flex items-center justify-between">
+            <div className="p-4 rounded-2xl bg-rose-50/60 border border-rose-100 flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold text-emerald-700">Worksheet Photos</p>
-                <p className="text-xl font-black text-emerald-950 mt-0.5">{withImages}</p>
+                <p className="text-xs font-semibold text-rose-700">PDFs & Photos</p>
+                <p className="text-xl font-black text-rose-950 mt-0.5">{withAttachments}</p>
               </div>
-              <div className="w-9 h-9 rounded-xl bg-white text-emerald-600 flex items-center justify-center shadow-xs">
-                <ImageIcon className="w-4 h-4" />
+              <div className="w-9 h-9 rounded-xl bg-white text-rose-600 flex items-center justify-center shadow-xs">
+                <FileText className="w-4 h-4" />
               </div>
             </div>
           </div>
@@ -336,97 +357,152 @@ export default function HomeworkSection({
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredList.map((hw) => (
-            <div 
-              key={hw.id}
-              className="p-4 rounded-2xl bg-white border border-slate-200/90 shadow-xs flex flex-col justify-between gap-3 hover:border-indigo-300 hover:shadow-md transition-all group"
-            >
-              <div className="flex flex-col gap-2.5">
-                {/* Card Top: Subject & Delete */}
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold ${
-                      hw.subject === 'Mathematics' ? 'bg-blue-100 text-blue-800' :
-                      hw.subject === 'Science' ? 'bg-emerald-100 text-emerald-800' :
-                      hw.subject === 'English' ? 'bg-purple-100 text-purple-800' :
-                      hw.subject === 'Social Studies' ? 'bg-amber-100 text-amber-800' :
-                      hw.subject === 'Hindi' ? 'bg-rose-100 text-rose-800' :
-                      'bg-slate-100 text-slate-800'
-                    }`}>
-                      {hw.subject}
-                    </span>
-                    <span className="text-[11px] font-semibold text-slate-500">
-                      By {hw.teacherName}
-                    </span>
+          {filteredList.map((hw) => {
+            // Determine attachment (support both new attachment object and legacy imageUrl)
+            const attachment = hw.attachment || (hw.imageUrl ? {
+              type: hw.imageUrl.startsWith('data:application/pdf') ? 'pdf' : 'image',
+              name: 'Worksheet File',
+              size: '',
+              url: hw.imageUrl
+            } : null);
+
+            const isPdf = attachment?.type === 'pdf' || attachment?.name?.toLowerCase().endsWith('.pdf') || attachment?.url?.startsWith('data:application/pdf');
+
+            return (
+              <div 
+                key={hw.id}
+                className="p-4 rounded-2xl bg-white border border-slate-200/90 shadow-xs flex flex-col justify-between gap-3 hover:border-indigo-300 hover:shadow-md transition-all group"
+              >
+                <div className="flex flex-col gap-2.5">
+                  {/* Card Top: Subject & Delete */}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`px-2.5 py-0.5 rounded-md text-[10px] font-bold ${
+                        hw.subject === 'Mathematics' ? 'bg-blue-100 text-blue-800' :
+                        hw.subject === 'Science' ? 'bg-emerald-100 text-emerald-800' :
+                        hw.subject === 'English' ? 'bg-purple-100 text-purple-800' :
+                        hw.subject === 'Social Studies' ? 'bg-amber-100 text-amber-800' :
+                        hw.subject === 'Hindi' ? 'bg-rose-100 text-rose-800' :
+                        'bg-slate-100 text-slate-800'
+                      }`}>
+                        {hw.subject}
+                      </span>
+                      <span className="text-[11px] font-semibold text-slate-500">
+                        By {hw.teacherName}
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={() => handleDelete(hw.id, hw.teacherName)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors opacity-80 group-hover:opacity-100"
+                      title="Delete homework post"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
 
-                  <button
-                    onClick={() => handleDelete(hw.id, hw.teacherName)}
-                    className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors opacity-80 group-hover:opacity-100"
-                    title="Delete homework post"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {/* Message Content */}
+                  <p className="text-xs text-slate-800 font-medium leading-relaxed whitespace-pre-line">
+                    {hw.message}
+                  </p>
+
+                  {/* Attached PDF Document Card */}
+                  {attachment && isPdf && (
+                    <div className="mt-1 p-3 rounded-2xl bg-rose-50/70 border border-rose-200/80 flex items-center justify-between gap-2.5">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-9 h-9 rounded-xl bg-rose-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                          <FileText className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-800 truncate">
+                            {attachment.name || 'Worksheet_Assignment.pdf'}
+                          </p>
+                          <span className="text-[10px] font-semibold text-rose-700 bg-rose-100/70 px-1.5 py-0.5 rounded">
+                            {attachment.size || 'PDF Document'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {attachment.url && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPdf({ url: attachment.url, name: attachment.name || 'Worksheet.pdf' })}
+                            className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-rose-100/60 border border-rose-200 text-rose-800 font-bold text-[11px] flex items-center gap-1 shadow-xs transition-all"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>View</span>
+                          </button>
+                        )}
+
+                        {attachment.url && (
+                          <a
+                            href={attachment.url}
+                            download={attachment.name || 'Worksheet.pdf'}
+                            className="p-1.5 rounded-xl bg-white hover:bg-rose-100/60 border border-rose-200 text-rose-800 shadow-xs transition-all"
+                            title="Download PDF"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Attached Worksheet Photo (Interactive Lightbox Viewer) */}
+                  {attachment && !isPdf && attachment.url && (
+                    <div 
+                      onClick={() => {
+                        setSelectedImage(attachment.url);
+                        setImageZoom(1);
+                      }}
+                      className="relative mt-1 rounded-xl overflow-hidden border border-slate-200 bg-slate-950 max-h-40 flex items-center justify-center cursor-pointer group/img"
+                      title="Click to view full image"
+                    >
+                      <img 
+                        src={attachment.url} 
+                        alt="Worksheet Attachment" 
+                        className="object-cover w-full max-h-40 group-hover/img:scale-105 transition-transform duration-200" 
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white text-xs font-bold">
+                        <Maximize2 className="w-4 h-4" />
+                        <span>Click to Enlarge</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Resource Link */}
+                  {hw.link && (
+                    <a 
+                      href={hw.link} 
+                      target="_blank" 
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 mt-1 truncate"
+                    >
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                      <span className="truncate">{hw.link}</span>
+                    </a>
+                  )}
                 </div>
 
-                {/* Message Content */}
-                <p className="text-xs text-slate-800 font-medium leading-relaxed whitespace-pre-line">
-                  {hw.message}
-                </p>
-
-                {/* Attached Worksheet Photo (Interactive Preview & Click-to-Open) */}
-                {hw.imageUrl && (
-                  <div 
-                    onClick={() => {
-                      setSelectedImage(hw.imageUrl);
-                      setImageZoom(1);
-                    }}
-                    className="relative mt-1 rounded-xl overflow-hidden border border-slate-200 bg-slate-950 max-h-40 flex items-center justify-center cursor-pointer group/img"
-                    title="Click to view full image"
-                  >
-                    <img 
-                      src={hw.imageUrl} 
-                      alt="Worksheet Attachment" 
-                      className="object-cover w-full max-h-40 group-hover/img:scale-105 transition-transform duration-200" 
-                    />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white text-xs font-bold">
-                      <Maximize2 className="w-4 h-4" />
-                      <span>Click to Enlarge</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Resource Link */}
-                {hw.link && (
-                  <a 
-                    href={hw.link} 
-                    target="_blank" 
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 mt-1 truncate"
-                  >
-                    <ExternalLink className="w-3 h-3 shrink-0" />
-                    <span className="truncate">{hw.link}</span>
-                  </a>
-                )}
-              </div>
-
-              {/* Bottom Timestamps & Deadline */}
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-100 text-[10px] text-slate-400">
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  <span>Posted {hw.postedAt}</span>
-                </span>
-
-                {hw.hasDeadline && hw.deadlineDate && (
-                  <span className="px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 font-bold flex items-center gap-1">
-                    <Calendar className="w-3 h-3 text-amber-600" />
-                    <span>Due: {hw.deadlineDate}</span>
+                {/* Bottom Timestamps & Deadline */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-slate-100 text-[10px] text-slate-400">
+                  <span className="flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    <span>Posted {hw.postedAt}</span>
                   </span>
-                )}
-              </div>
 
-            </div>
-          ))}
+                  {hw.hasDeadline && hw.deadlineDate && (
+                    <span className="px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200 text-amber-800 font-bold flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-amber-600" />
+                      <span>Due: {hw.deadlineDate}</span>
+                    </span>
+                  )}
+                </div>
+
+              </div>
+            );
+          })}
         </div>
       )}
 
@@ -444,7 +520,7 @@ export default function HomeworkSection({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-800">Post Homework or Notice</h3>
-                  <p className="text-xs text-slate-400">Visible to all teachers, admins, and parents</p>
+                  <p className="text-xs text-slate-400">Attach photos or PDF worksheets for students</p>
                 </div>
               </div>
               <button 
@@ -484,7 +560,7 @@ export default function HomeworkSection({
                 <textarea
                   rows={4}
                   required
-                  placeholder="e.g. Read Chapter 4 and solve exercises 1 to 5. Bring completed work on Monday."
+                  placeholder="e.g. Read Chapter 4 and complete questions 1-8. Refer to the attached PDF worksheet."
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   className="w-full mt-1 p-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 leading-relaxed font-medium"
@@ -506,29 +582,46 @@ export default function HomeworkSection({
                 />
               </div>
 
-              {/* Optional Worksheet / Image Upload */}
+              {/* Optional Photo or PDF Worksheet Upload */}
               <div>
                 <label className="font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
-                  <ImageIcon className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Attach Photo / Worksheet (Optional)</span>
+                  <FileText className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Attach Worksheet (Photo or PDF Document)</span>
                 </label>
                 
-                {imagePreview ? (
-                  <div className="relative rounded-2xl overflow-hidden border border-slate-200 max-h-40 bg-slate-900 flex items-center justify-center">
-                    <img src={imagePreview} alt="Worksheet" className="object-contain max-h-40 w-full" />
+                {attachedFile ? (
+                  <div className="relative rounded-2xl overflow-hidden border border-slate-200 p-3 bg-slate-50 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                        attachedFile.type === 'pdf' ? 'bg-rose-500 text-white' : 'bg-indigo-600 text-white'
+                      }`}>
+                        {attachedFile.type === 'pdf' ? <FileText className="w-5 h-5" /> : <ImageIcon className="w-5 h-5" />}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-800 truncate">{attachedFile.name}</p>
+                        <p className="text-[10px] text-slate-400">{attachedFile.size} • {attachedFile.type.toUpperCase()}</p>
+                      </div>
+                    </div>
+
                     <button
                       type="button"
-                      onClick={() => setImagePreview(null)}
-                      className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-white hover:bg-black/80"
+                      onClick={() => setAttachedFile(null)}
+                      className="p-1.5 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors"
+                      title="Remove attachment"
                     >
-                      <X className="w-3.5 h-3.5" />
+                      <X className="w-4 h-4" />
                     </button>
                   </div>
                 ) : (
                   <label className="flex items-center justify-center gap-2 p-3.5 rounded-xl border border-dashed border-slate-300 hover:border-indigo-400 bg-slate-50/60 cursor-pointer text-slate-600 transition-colors">
-                    <ImageIcon className="w-4 h-4 text-slate-400" />
-                    <span className="text-xs font-semibold">Click to upload worksheet image</span>
-                    <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                    <FileText className="w-4 h-4 text-slate-400" />
+                    <span className="text-xs font-semibold">Click to upload Worksheet Photo or PDF</span>
+                    <input 
+                      type="file" 
+                      accept="image/*,application/pdf" 
+                      onChange={handleFileUpload} 
+                      className="hidden" 
+                    />
                   </label>
                 )}
               </div>
@@ -656,6 +749,71 @@ export default function HomeworkSection({
           <p className="text-[11px] text-slate-400 mt-2">
             Click anywhere outside the picture or press &times; to exit viewer.
           </p>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* PDF VIEWER MODAL: IN-APP EMBEDDED PDF LIGHTBOX             */}
+      {/* ======================================================== */}
+      {selectedPdf && (
+        <div 
+          className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200"
+          onClick={() => setSelectedPdf(null)}
+        >
+          <div 
+            className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden max-h-[92vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-100 bg-slate-50">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                  <FileText className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <h4 className="text-xs sm:text-sm font-bold text-slate-800 truncate">{selectedPdf.name}</h4>
+                  <p className="text-[10px] text-slate-400">Class 8-A PDF Worksheet Document</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.open(selectedPdf.url, '_blank')}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-all"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Open in New Tab</span>
+                </button>
+
+                <a
+                  href={selectedPdf.url}
+                  download={selectedPdf.name}
+                  className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Download</span>
+                </a>
+
+                <button
+                  onClick={() => setSelectedPdf(null)}
+                  className="p-1.5 rounded-xl hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors ml-1"
+                  title="Close"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Embedded PDF Viewer */}
+            <div className="flex-1 w-full bg-slate-100 p-2 sm:p-4 min-h-[60vh] max-h-[78vh] flex flex-col items-center justify-center">
+              <iframe
+                src={selectedPdf.url}
+                className="w-full h-full min-h-[60vh] rounded-xl border border-slate-200 bg-white"
+                title="PDF Worksheet Preview"
+              />
+            </div>
+          </div>
         </div>
       )}
 
