@@ -29,6 +29,18 @@ export default function App() {
   const [students, setStudents] = useState([]);
   const [currentSubjectFilter, setCurrentSubjectFilter] = useState('all');
 
+  // Date-based Attendance State
+  const [selectedAttendanceDate, setSelectedAttendanceDate] = useState(() => {
+    return new Date().toISOString().split('T')[0];
+  });
+  const [attendanceHistory, setAttendanceHistory] = useState(() => {
+    try {
+      const saved = localStorage.getItem('myschool_attendance_history');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {};
+  });
+
   // Modals
   const [isScanModalOpen, setIsScanModalOpen] = useState(false);
   const [scanInitialType, setScanInitialType] = useState('marksheet');
@@ -98,12 +110,66 @@ export default function App() {
     fetchStudents();
   }, []);
 
+  // Universal Mobile Back Button: Intercept Android/browser back button to dismiss open modal instead of closing app
+  useEffect(() => {
+    const isModalOpen = isAuthModalOpen || isProfileModalOpen || isExportModalOpen || !!selectedStudentDetail || !!emailModalData;
+    if (isModalOpen) {
+      window.history.pushState({ appModalOpen: true }, '');
+      const handleBack = () => {
+        setIsAuthModalOpen(false);
+        setIsProfileModalOpen(false);
+        setIsExportModalOpen(false);
+        setSelectedStudentDetail(null);
+        setEmailModalData(null);
+      };
+      window.addEventListener('popstate', handleBack);
+      return () => {
+        window.removeEventListener('popstate', handleBack);
+      };
+    }
+  }, [isAuthModalOpen, isProfileModalOpen, isExportModalOpen, selectedStudentDetail, emailModalData]);
+
+  // Dual Persistence: State + LocalStorage Cache
+  const updateAndPersistStudents = (newStudentsOrFn) => {
+    setStudents(prev => {
+      const updated = typeof newStudentsOrFn === 'function' ? newStudentsOrFn(prev) : newStudentsOrFn;
+      try {
+        localStorage.setItem('myschool_students_cache', JSON.stringify(updated));
+      } catch (e) {
+        console.warn('LocalStorage students cache write error:', e);
+      }
+      return updated;
+    });
+  };
+
   const fetchStudents = async () => {
+    // 1. Immediately load cached students from localStorage so UI never flashes empty
+    try {
+      const cached = localStorage.getItem('myschool_students_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setStudents(parsed);
+        }
+      }
+    } catch (e) {}
+
+    // 2. Fetch fresh data from backend
     try {
       const res = await fetch('/api/students');
       const json = await res.json();
       if (json.success && json.data) {
         setStudents(json.data);
+        localStorage.setItem('myschool_students_cache', JSON.stringify(json.data));
+      }
+      if (json.attendanceHistory && Object.keys(json.attendanceHistory).length > 0) {
+        setAttendanceHistory(prev => {
+          const merged = { ...json.attendanceHistory, ...prev };
+          try {
+            localStorage.setItem('myschool_attendance_history', JSON.stringify(merged));
+          } catch (e) {}
+          return merged;
+        });
       }
     } catch (err) {
       console.error('Failed to load students:', err);
@@ -146,21 +212,46 @@ export default function App() {
     return { grade: 'Help', color: 'text-rose-700 bg-rose-50 border-rose-200' };
   };
 
-  // Attendance Toggle
-  const toggleAttendance = async (rollNo) => {
-    const student = students.find(s => s.rollNo === rollNo);
-    if (!student) return;
-    const newStatus = student.attendance === 'P' ? 'A' : 'P';
+  // Attendance Toggle (strictly isolated per date, persists to storage & DB)
+  const toggleAttendance = async (rollNo, dateStr) => {
+    const targetDate = dateStr || selectedAttendanceDate || new Date().toISOString().split('T')[0];
+    const todayStr = new Date().toISOString().split('T')[0];
 
-    setStudents(prev => prev.map(s => s.rollNo === rollNo ? { ...s, attendance: newStatus } : s));
+    // Determine current status strictly for targetDate without cross-date leakage
+    const currentStatus = attendanceHistory[targetDate]?.[rollNo] !== undefined
+      ? attendanceHistory[targetDate][rollNo]
+      : (targetDate === todayStr ? (students.find(s => s.rollNo === rollNo)?.attendance || 'P') : 'P');
+    
+    const newStatus = currentStatus === 'P' ? 'A' : 'P';
 
+    // 1. Update attendanceHistory state strictly for targetDate
+    setAttendanceHistory(prev => {
+      const existingDay = prev[targetDate] ? { ...prev[targetDate] } : {};
+      existingDay[rollNo] = newStatus;
+      const updated = {
+        ...prev,
+        [targetDate]: existingDay
+      };
+      try {
+        localStorage.setItem('myschool_attendance_history', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    // 2. Only if the modified date IS today, update student.attendance for today's live cards
+    if (targetDate === todayStr) {
+      updateAndPersistStudents(prev => prev.map(s => s.rollNo === rollNo ? { ...s, attendance: newStatus } : s));
+    }
+
+    // 3. Persist to server/database with exact date
     try {
       await fetch('/api/students', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'update_single',
-          updates: { rollNo, attendance: newStatus }
+          action: 'update_attendance',
+          date: targetDate,
+          updates: { rollNo, attendance: newStatus, date: targetDate }
         })
       });
     } catch (e) {
@@ -187,7 +278,7 @@ export default function App() {
 
     const num = val === '' ? '' : Math.min(25, Math.max(0, Number(val)));
 
-    setStudents(prev => prev.map(s => {
+    updateAndPersistStudents(prev => prev.map(s => {
       if (s.rollNo === rollNo) {
         return { ...s, marks: { ...s.marks, [subjectKey]: num } };
       }
@@ -216,14 +307,14 @@ export default function App() {
   };
 
   // Apply OCR Data with Smart Roll No or Name Matching
-  const handleApplyAiData = async (type, subject, data) => {
+  const handleApplyAiData = async (type, subject, data, dateOverride) => {
     if (!data || !data.records) return;
 
     if (type === 'marksheet') {
       const records = data.records;
       const updates = [];
 
-      setStudents(prev => {
+      updateAndPersistStudents(prev => {
         return prev.map(s => {
           // Find matching record by roll number OR name
           const matchedRecord = records.find(r => findMatchingStudent([s], r) !== null);
@@ -252,39 +343,76 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'apply_ocr_marks', updates })
         });
-        showToast(`✅ Matched & updated marks for ${updates.length} students!`);
+        if (updates.length === 1) {
+          const matched = students.find(s => s.rollNo === updates[0].rollNo);
+          showToast(`✅ Updated ${matched?.name || 'Student'} (#${updates[0].rollNo}): ${updates[0].mark} marks!`);
+        } else {
+          showToast(`✅ Matched & updated marks for ${updates.length} students!`);
+        }
       } else {
-        showToast('⚠️ No student roll numbers or names matched in class roster.');
+        const sampleName = records[0]?.name ? `"${records[0].name}"` : 'Student';
+        const sampleRoll = records[0]?.rollNo ? `(Roll #${records[0].rollNo})` : '';
+        showToast(`⚠️ Scanned ${sampleName} ${sampleRoll} not found in this class roster.`);
       }
     } else {
+      // type === 'attendance'
       const records = data.records;
+      const targetDate = dateOverride || selectedAttendanceDate || new Date().toISOString().split('T')[0];
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      // Automatically switch the active view to this target date
+      setSelectedAttendanceDate(targetDate);
+
       const updates = [];
+      const newDayMap = { ...(attendanceHistory[targetDate] || {}) };
 
-      setStudents(prev => {
-        return prev.map(s => {
-          const matchedRecord = records.find(r => findMatchingStudent([s], r) !== null);
-
-          if (matchedRecord && matchedRecord.status) {
-            updates.push({
-              rollNo: s.rollNo,
-              status: matchedRecord.status
-            });
-            return {
-              ...s,
-              attendance: matchedRecord.status
-            };
-          }
-          return s;
-        });
+      records.forEach(r => {
+        const matched = findMatchingStudent(students, r);
+        if (matched && r.status) {
+          const cleanStatus = r.status.toUpperCase() === 'A' ? 'A' : 'P';
+          newDayMap[matched.rollNo] = cleanStatus;
+          updates.push({
+            rollNo: matched.rollNo,
+            status: cleanStatus,
+            date: targetDate
+          });
+        }
       });
+
+      // Update attendance history for the active date
+      setAttendanceHistory(prev => {
+        const updated = {
+          ...prev,
+          [targetDate]: newDayMap
+        };
+        try {
+          localStorage.setItem('myschool_attendance_history', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      });
+
+      // If active date is today, also sync students' immediate attendance
+      if (targetDate === todayStr) {
+        updateAndPersistStudents(prev => {
+          return prev.map(s => {
+            if (newDayMap[s.rollNo]) {
+              return { ...s, attendance: newDayMap[s.rollNo] };
+            }
+            return s;
+          });
+        });
+      }
 
       if (updates.length > 0) {
         await fetch('/api/students', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'apply_ocr_attendance', updates })
+          body: JSON.stringify({ action: 'apply_ocr_attendance', updates, date: targetDate })
         });
-        showToast(`✅ Matched & updated attendance for ${updates.length} students!`);
+        const dateFormatted = new Date(targetDate + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+        showToast(`✅ Matched & applied attendance for ${updates.length} students on ${dateFormatted}!`);
+      } else {
+        showToast(`⚠️ No matching students found from the scanned register.`);
       }
     }
   };
@@ -393,7 +521,7 @@ export default function App() {
           };
         });
 
-        setStudents(imported);
+        updateAndPersistStudents(imported);
         await fetch('/api/students', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -450,7 +578,7 @@ export default function App() {
   };
 
   // Bulk Email Dispatch
-  const handleOpenEmailAll = (type) => {
+  const handleOpenEmailAll = (type, targetDate) => {
     if (currentUser?.role === 'subject_teacher') {
       showToast('🔒 Only Class Teacher can send bulk final report cards.');
       return;
@@ -460,8 +588,15 @@ export default function App() {
       setStudents(prev => prev.map(s => ({ ...s, emailed: true })));
       showToast('📧 Multi-subject report cards dispatched to all parents!');
     } else {
-      const absentees = students.filter(s => s.attendance === 'A');
-      showToast(`📧 Absence alert emails sent to ${absentees.length} parents!`);
+      const activeD = targetDate || selectedAttendanceDate || new Date().toISOString().split('T')[0];
+      const todayStr = new Date().toISOString().split('T')[0];
+      const absentees = students.filter(s => {
+        const status = attendanceHistory[activeD]?.[s.rollNo] !== undefined 
+          ? attendanceHistory[activeD][s.rollNo]
+          : (activeD === todayStr ? (s.attendance || 'P') : 'P');
+        return status === 'A';
+      });
+      showToast(`📧 Absence alert emails sent to ${absentees.length} parents for ${activeD}!`);
     }
   };
 
@@ -525,6 +660,9 @@ export default function App() {
         {activeTab === 'attendance' && (
           <AttendanceTab 
             students={students}
+            selectedDate={selectedAttendanceDate}
+            onChangeDate={setSelectedAttendanceDate}
+            attendanceHistory={attendanceHistory}
             onToggleAttendance={toggleAttendance}
             onOpenScanModal={handleOpenScan}
             onOpenExportModal={() => setIsExportModalOpen(true)}
@@ -595,6 +733,7 @@ export default function App() {
         onClose={() => setIsScanModalOpen(false)}
         initialType={scanInitialType}
         students={students}
+        selectedDate={selectedAttendanceDate}
         onApplyData={handleApplyAiData}
         currentUser={currentUser}
         showToast={showToast}
@@ -605,6 +744,8 @@ export default function App() {
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
         students={students}
+        selectedDate={selectedAttendanceDate}
+        attendanceHistory={attendanceHistory}
         onExportToast={showToast}
       />
 

@@ -105,9 +105,21 @@ let fallbackStudentsDB = [
   }
 ];
 
+// In-memory fallback history per date (YYYY-MM-DD -> { [rollNo]: 'P' | 'A' })
+let fallbackAttendanceHistory = {};
+
 const getTodayDateStr = () => new Date().toISOString().split('T')[0];
 
-// GET: Fetch all students from Supabase (or fallback)
+// Seed today's initial record in fallback history
+(() => {
+  const t = getTodayDateStr();
+  fallbackAttendanceHistory[t] = {};
+  fallbackStudentsDB.forEach(s => {
+    fallbackAttendanceHistory[t][s.rollNo] = s.attendance || 'P';
+  });
+})();
+
+// GET: Fetch all students and full date-based attendance history
 export async function GET() {
   try {
     const today = getTodayDateStr();
@@ -124,16 +136,28 @@ export async function GET() {
         .from('marks')
         .select('student_id, subject, score');
 
-      // Fetch today's attendance
+      // Fetch all attendance history
       const { data: attendanceData } = await supabase
         .from('attendance')
-        .select('student_id, status')
-        .eq('date', today);
+        .select('student_id, date, status');
+
+      const studentIdToRoll = {};
+      studentsData.forEach(s => {
+        studentIdToRoll[s.id] = s.roll_no;
+      });
 
       const attendanceMap = {};
+      const historyMap = {};
       if (attendanceData) {
         attendanceData.forEach(a => {
-          attendanceMap[a.student_id] = a.status;
+          const roll = studentIdToRoll[a.student_id];
+          if (a.date === today) {
+            attendanceMap[a.student_id] = a.status;
+          }
+          if (roll && a.date) {
+            if (!historyMap[a.date]) historyMap[a.date] = {};
+            historyMap[a.date][roll] = a.status;
+          }
         });
       }
 
@@ -163,13 +187,23 @@ export async function GET() {
         }
       }));
 
-      return NextResponse.json({ success: true, data: formatted, source: 'supabase' });
+      return NextResponse.json({ 
+        success: true, 
+        data: formatted, 
+        attendanceHistory: historyMap,
+        source: 'supabase' 
+      });
     }
   } catch (err) {
     console.warn('Supabase not reachable yet, falling back to local memory:', err.message);
   }
 
-  return NextResponse.json({ success: true, data: fallbackStudentsDB, source: 'memory' });
+  return NextResponse.json({ 
+    success: true, 
+    data: fallbackStudentsDB, 
+    attendanceHistory: fallbackAttendanceHistory,
+    source: 'memory' 
+  });
 }
 
 // POST: Update marks, attendance, or Admin Student Management
@@ -293,8 +327,9 @@ export async function POST(request) {
       return NextResponse.json({ success: true, data: fallbackStudentsDB });
     }
 
-    // 5. Update single student
-    if (action === 'update_single' && updates) {
+    // 5. Update single student or attendance
+    if ((action === 'update_single' || action === 'update_attendance') && updates) {
+      const targetDate = updates.date || body.date || today;
       try {
         const { data: stRow } = await supabase
           .from('students')
@@ -306,7 +341,7 @@ export async function POST(request) {
           if (updates.attendance) {
             await supabase.from('attendance').upsert({
               student_id: stRow.id,
-              date: today,
+              date: targetDate,
               status: updates.attendance
             }, { onConflict: 'student_id,date' });
           }
@@ -326,14 +361,20 @@ export async function POST(request) {
           }
         }
       } catch (err) {
-        console.warn('Supabase update_single error:', err);
+        console.warn('Supabase update_single/update_attendance error:', err);
+      }
+
+      // Update in-memory date history
+      if (updates.attendance) {
+        if (!fallbackAttendanceHistory[targetDate]) fallbackAttendanceHistory[targetDate] = {};
+        fallbackAttendanceHistory[targetDate][updates.rollNo] = updates.attendance;
       }
 
       fallbackStudentsDB = fallbackStudentsDB.map(s => {
         if (s.rollNo === updates.rollNo) {
           return {
             ...s,
-            ...(updates.attendance ? { attendance: updates.attendance } : {}),
+            ...(targetDate === today && updates.attendance ? { attendance: updates.attendance } : {}),
             ...(updates.marks ? { marks: { ...s.marks, ...updates.marks } } : {}),
             ...(updates.emailed !== undefined ? { emailed: updates.emailed } : {})
           };
@@ -341,7 +382,11 @@ export async function POST(request) {
         return s;
       });
 
-      return NextResponse.json({ success: true, data: fallbackStudentsDB });
+      return NextResponse.json({ 
+        success: true, 
+        data: fallbackStudentsDB, 
+        attendanceHistory: fallbackAttendanceHistory 
+      });
     }
 
     // 6. Apply OCR Extracted Marks
@@ -380,6 +425,7 @@ export async function POST(request) {
 
     // 7. Apply OCR Extracted Attendance
     if (action === 'apply_ocr_attendance' && Array.isArray(updates)) {
+      const targetDate = body.date || today;
       try {
         for (const item of updates) {
           const { data: stRow } = await supabase
@@ -391,7 +437,7 @@ export async function POST(request) {
           if (stRow && item.status) {
             await supabase.from('attendance').upsert({
               student_id: stRow.id,
-              date: today,
+              date: item.date || targetDate,
               status: item.status
             }, { onConflict: 'student_id,date' });
           }
@@ -402,12 +448,21 @@ export async function POST(request) {
 
       updates.forEach(item => {
         const student = fallbackStudentsDB.find(s => s.rollNo === item.rollNo);
-        if (student && item.status) {
+        const itemDate = item.date || targetDate;
+        if (!fallbackAttendanceHistory[itemDate]) fallbackAttendanceHistory[itemDate] = {};
+        if (item.status) {
+          fallbackAttendanceHistory[itemDate][item.rollNo] = item.status;
+        }
+        if (student && item.status && itemDate === today) {
           student.attendance = item.status;
         }
       });
 
-      return NextResponse.json({ success: true, data: fallbackStudentsDB });
+      return NextResponse.json({ 
+        success: true, 
+        data: fallbackStudentsDB, 
+        attendanceHistory: fallbackAttendanceHistory 
+      });
     }
 
     return NextResponse.json({ success: true, data: fallbackStudentsDB });

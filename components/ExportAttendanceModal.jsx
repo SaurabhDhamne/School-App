@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { Download, Calendar, X, FileSpreadsheet, Check, Clock } from 'lucide-react';
 
-export default function ExportAttendanceModal({ isOpen, onClose, students, onExportToast }) {
+export default function ExportAttendanceModal({ isOpen, onClose, students, selectedDate, attendanceHistory = {}, onExportToast }) {
   const [exportType, setExportType] = useState('weekly'); // 'weekly' | 'monthly' | 'custom'
   const [startDate, setStartDate] = useState(() => {
     const d = new Date();
@@ -13,6 +13,19 @@ export default function ExportAttendanceModal({ isOpen, onClose, students, onExp
   const [endDate, setEndDate] = useState(() => new Date().toISOString().split('T')[0]);
 
   if (!isOpen) return null;
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const activeDate = selectedDate || todayStr;
+
+  const getStatus = (rollNo, dateStr) => {
+    if (attendanceHistory[dateStr] && attendanceHistory[dateStr][rollNo] !== undefined) {
+      return attendanceHistory[dateStr][rollNo];
+    }
+    if (dateStr === todayStr) {
+      return students.find(s => s.rollNo === rollNo)?.attendance || 'P';
+    }
+    return 'P';
+  };
 
   const handleDownload = () => {
     let filename = '';
@@ -52,10 +65,11 @@ export default function ExportAttendanceModal({ isOpen, onClose, students, onExp
       });
     } else {
       filename = `Attendance_Custom_${startDate}_to_${endDate}.csv`;
-      csvHeader = `Roll No,Student Name,Start Date,End Date,Status Today,Parent Email,Parent Phone\n`;
+      csvHeader = `Roll No,Student Name,Start Date,End Date,Status on ${activeDate},Parent Email,Parent Phone\n`;
       
       rows = students.map(s => {
-        return `"${s.rollNo}","${s.name}","${startDate}","${endDate}","${s.attendance === 'P' ? 'Present' : 'Absent'}","${s.parentEmail}","${s.parentPhone}"`;
+        const st = getStatus(s.rollNo, activeDate);
+        return `"${s.rollNo}","${s.name}","${startDate}","${endDate}","${st === 'P' ? 'Present' : 'Absent'}","${s.parentEmail}","${s.parentPhone}"`;
       });
     }
 
