@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { 
   ShieldCheck, 
   Users, 
@@ -17,27 +18,46 @@ import {
   KeyRound,
   Sparkles,
   AlertTriangle,
-  Lock
+  Lock,
+  Upload,
+  Download,
+  FileSpreadsheet,
+  Layers,
+  Filter,
+  CheckSquare,
+  Square,
+  ChevronDown
 } from 'lucide-react';
+import { getSchoolConfig } from '@/lib/schoolConfig';
 
 export default function AdminTab({ students, onRefreshStudents, showToast }) {
   const [activeAdminSubTab, setActiveAdminSubTab] = useState('teachers'); // 'teachers' | 'students'
+  const [selectedClassFilter, setSelectedClassFilter] = useState('all'); // 'all' | 'Class 8-A' | etc.
+  const studentFileInputRef = useRef(null);
 
-  // Available classes in MySchool
-  const schoolClasses = [
-    'Class 8-A',
-    'Class 8-B',
-    'Class 9-A',
-    'Class 9-B',
-    'Class 10-A',
-    'Class 10-B',
-    'Class 7-A',
-    'Class 7-B',
-  ];
+  // Available classes in School from centralized config
+  const schoolConfig = getSchoolConfig();
+  const schoolClasses = schoolConfig.classes && schoolConfig.classes.length > 0
+    ? schoolConfig.classes
+    : [
+        'Class 8-A',
+        'Class 8-B',
+        'Class 9-A',
+        'Class 9-B',
+        'Class 10-A',
+        'Class 10-B',
+        'Class 7-A',
+        'Class 7-B',
+      ];
 
   // Teachers State
   const [teachers, setTeachers] = useState([]);
   const [isLoadingTeachers, setIsLoadingTeachers] = useState(false);
+
+  // Clean Slate & Demo Onboarding Modals
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [isDemoModalOpen, setIsDemoModalOpen] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   // Teacher Modals
   const [isTeacherModalOpen, setIsTeacherModalOpen] = useState(false);
@@ -46,8 +66,9 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
   const [teacherEmail, setTeacherEmail] = useState('');
   const [teacherPassword, setTeacherPassword] = useState('');
   const [teacherRole, setTeacherRole] = useState('subject_teacher');
-  const [teacherClass, setTeacherClass] = useState('Class 8-A');
-  const [teacherSubject, setTeacherSubject] = useState('Science');
+  const [isClassTeacherChecked, setIsClassTeacherChecked] = useState(false);
+  const [teacherClass, setTeacherClass] = useState(() => schoolClasses[0] || 'Class 8-A');
+  const [teacherSubject, setTeacherSubject] = useState('Mathematics');
 
   // Confirmation Delete Modal
   const [teacherToDelete, setTeacherToDelete] = useState(null);
@@ -88,15 +109,96 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
     return `${first || 'teacher'}@123`;
   };
 
+  // ---------------- Clean Slate & Onboarding Actions ----------------
+  const handleCleanSlate = async () => {
+    setIsResetting(true);
+    try {
+      // 1. Clear all students, marks, attendance
+      await fetch('/api/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'admin_clear_all_students' })
+      });
+
+      // 2. Clear all teachers (keeping master admin)
+      await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'admin_clear_all_teachers' })
+      });
+
+      // 3. Clear local storage caches
+      try {
+        localStorage.removeItem('myschool_students_cache');
+        localStorage.removeItem('myschool_attendance_history');
+        localStorage.setItem('myschool_homework_posts', '[]');
+      } catch (e) {}
+
+      // 4. Update UI states
+      setTeachers([]);
+      if (typeof onRefreshStudents === 'function') {
+        await onRefreshStudents();
+      }
+
+      showToast('🎉 Clean Slate Initialized! 0 records. Ready to onboard your new school.');
+      setIsResetModalOpen(false);
+    } catch (e) {
+      console.error(e);
+      showToast('⚠️ Error clearing database records.');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
+  const handleRestoreDemo = async () => {
+    setIsResetting(true);
+    try {
+      // 1. Restore demo students
+      await fetch('/api/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'admin_load_demo_students' })
+      });
+
+      // 2. Restore demo teachers
+      await fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'admin_load_demo_teachers' })
+      });
+
+      // 3. Clear local storage caches so fresh demo syncs
+      try {
+        localStorage.removeItem('myschool_students_cache');
+        localStorage.removeItem('myschool_attendance_history');
+        localStorage.removeItem('myschool_homework_posts');
+      } catch (e) {}
+
+      // 4. Update UI states
+      await fetchTeachers();
+      if (typeof onRefreshStudents === 'function') {
+        await onRefreshStudents();
+      }
+
+      showToast('✨ Demo records (Class 8-A & Faculty) restored for presentation.');
+      setIsDemoModalOpen(false);
+    } catch (e) {
+      console.error(e);
+      showToast('⚠️ Error restoring demo records.');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   // ---------------- Teacher Actions ----------------
   const handleOpenAddTeacher = () => {
     setEditingTeacher(null);
     setTeacherName('');
     setTeacherEmail('');
     setTeacherPassword('');
-    setTeacherRole('subject_teacher');
+    setIsClassTeacherChecked(false);
     setTeacherClass('Class 8-A');
-    setTeacherSubject('Science');
+    setTeacherSubject('Mathematics');
     setIsTeacherModalOpen(true);
   };
 
@@ -105,14 +207,17 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
     setTeacherName(t.name);
     setTeacherEmail(t.email);
     setTeacherPassword(t.password || getFirstNamePassword(t.name));
-    setTeacherRole(t.role);
-    setTeacherClass(t.class_name || 'Class 8-A');
+    setIsClassTeacherChecked(t.role === 'class_teacher' || (t.class_name && t.class_name !== 'All Classes'));
+    setTeacherClass(t.class_name && t.class_name !== 'All Classes' ? t.class_name : 'Class 8-A');
     setTeacherSubject(t.subject || 'Mathematics');
     setIsTeacherModalOpen(true);
   };
 
   const handleSaveTeacher = async (e) => {
     e.preventDefault();
+    const role = isClassTeacherChecked ? 'class_teacher' : 'subject_teacher';
+    const className = isClassTeacherChecked ? teacherClass : null;
+
     try {
       if (editingTeacher) {
         await fetch('/api/auth', {
@@ -123,8 +228,8 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
             id: editingTeacher.id,
             name: teacherName,
             email: teacherEmail,
-            role: teacherRole,
-            className: teacherClass,
+            role,
+            className,
             subject: teacherSubject,
             password: teacherPassword
           })
@@ -138,8 +243,8 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
             action: 'admin_add_teacher',
             name: teacherName,
             email: teacherEmail,
-            role: teacherRole,
-            className: teacherClass,
+            role,
+            className,
             subject: teacherSubject
           })
         });
@@ -172,9 +277,11 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
   // ---------------- Student Actions ----------------
   const handleOpenAddStudent = () => {
     setEditingStudent(null);
-    setStudentRollNo(String(students.length + 1).padStart(2, '0'));
+    const targetClass = selectedClassFilter !== 'all' ? selectedClassFilter : 'Class 8-A';
+    const countInClass = students.filter(s => (s.className || 'Class 8-A') === targetClass).length;
+    setStudentRollNo(String(countInClass + 1).padStart(2, '0'));
     setStudentName('');
-    setStudentClass('Class 8-A');
+    setStudentClass(targetClass);
     setStudentParentEmail('');
     setStudentParentPhone('');
     setIsStudentModalOpen(true);
@@ -188,6 +295,99 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
     setStudentParentEmail(st.parentEmail || '');
     setStudentParentPhone(st.parentPhone || '');
     setIsStudentModalOpen(true);
+  };
+
+  // Bulk Student Upload from Excel / CSV
+  const handleBulkStudentUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const data = new Uint8Array(evt.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheet = workbook.SheetNames[0];
+        const rows = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheet], { defval: '' });
+
+        if (!rows || rows.length === 0) {
+          showToast('⚠️ The uploaded spreadsheet is empty.');
+          return;
+        }
+
+        const fallbackClass = selectedClassFilter !== 'all' ? selectedClassFilter : 'Class 8-A';
+        const parsed = rows.map((r, i) => {
+          const roll = String(r['Roll No'] || r['Roll'] || r['rollNo'] || r['roll'] || i + 1).padStart(2, '0');
+          const name = String(r['Student Name'] || r['Name'] || r['name'] || `Student ${roll}`).trim();
+          const cls = String(r['Class'] || r['ClassName'] || r['className'] || fallbackClass).trim();
+          const email = String(r['Parent Email'] || r['Email'] || r['email'] || '').trim();
+          const phone = String(r['Parent Phone'] || r['Phone'] || r['phone'] || '').trim();
+
+          return {
+            rollNo: roll,
+            name,
+            className: cls,
+            parentEmail: email,
+            parentPhone: phone
+          };
+        });
+
+        const res = await fetch('/api/students', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'admin_bulk_add_students',
+            students: parsed
+          })
+        });
+
+        const json = await res.json();
+        if (json.success) {
+          showToast(`🎉 Enrolled ${parsed.length} students across classes successfully!`);
+          onRefreshStudents();
+        } else {
+          showToast(`⚠️ Upload failed: ${json.error || 'Server error'}`);
+        }
+      } catch (err) {
+        console.error('Bulk student upload error:', err);
+        showToast('⚠️ Could not parse file. Please use the sample Excel template.');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  };
+
+  // Download Student Enrollment Sample Template
+  const handleDownloadStudentTemplate = () => {
+    const sampleData = [
+      {
+        'Roll No': '01',
+        'Student Name': 'Aarav Mehta',
+        'Class': selectedClassFilter !== 'all' ? selectedClassFilter : 'Class 8-B',
+        'Parent Email': 'parent.mehta@example.com',
+        'Parent Phone': '9876543210'
+      },
+      {
+        'Roll No': '02',
+        'Student Name': 'Ananya Das',
+        'Class': selectedClassFilter !== 'all' ? selectedClassFilter : 'Class 8-B',
+        'Parent Email': 'parent.das@example.com',
+        'Parent Phone': '9876543211'
+      },
+      {
+        'Roll No': '03',
+        'Student Name': 'Kabir Sharma',
+        'Class': selectedClassFilter !== 'all' ? selectedClassFilter : 'Class 8-B',
+        'Parent Email': 'parent.ksharma@example.com',
+        'Parent Phone': '9876543212'
+      }
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(sampleData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Student_Enrollment');
+    XLSX.writeFile(wb, 'MySchool_Student_Enrollment_Template.xlsx');
+    showToast('📥 Downloaded Student Enrollment Excel Template!');
   };
 
   const handleSaveStudent = async (e) => {
@@ -298,6 +498,36 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
         </div>
       </div>
 
+      {/* Quick School Onboarding & Data Management Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+          <span className="text-xs font-bold text-slate-700">School Onboarding & Database State:</span>
+          <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold">
+            {students.length} Students &bull; {teachers.length} Teachers
+          </span>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setIsResetModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition-colors"
+            title="Clear all demo students and teachers to onboard a brand new school"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+            <span>Clean Slate (0 Records)</span>
+          </button>
+          <button
+            onClick={() => setIsDemoModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-colors"
+            title="Restore sample demo data for presentation and testing"
+          >
+            <RefreshCw className="w-3.5 h-3.5 text-indigo-500" />
+            <span>Load Demo Data</span>
+          </button>
+        </div>
+      </div>
+
       {/* ========================================================= */}
       {/* 1. TEACHER MANAGEMENT SECTION                             */}
       {/* ========================================================= */}
@@ -330,7 +560,18 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {teachers.map(t => (
+                {teachers.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-12 text-center text-slate-400">
+                      <div className="flex flex-col items-center justify-center gap-2">
+                        <Users className="w-8 h-8 text-slate-300" />
+                        <p className="font-bold text-slate-700 text-xs">No faculty accounts registered yet</p>
+                        <p className="text-[11px] text-slate-400">Click &ldquo;Add New Teacher&rdquo; to create teacher logins for this school.</p>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  teachers.map(t => (
                   <tr key={t.id} className="hover:bg-slate-50/70 transition-colors">
                     <td className="py-3.5 px-4 sm:px-6 font-bold text-slate-800 flex items-center gap-2.5">
                       <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs shrink-0">
@@ -380,7 +621,7 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
                       </div>
                     </td>
                   </tr>
-                ))}
+                )))}
               </tbody>
             </table>
           </div>
@@ -392,18 +633,94 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
       {/* ========================================================= */}
       {activeAdminSubTab === 'students' && (
         <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden flex flex-col">
-          <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          
+          {/* Hidden File Input for Bulk Student Import */}
+          <input 
+            type="file" 
+            ref={studentFileInputRef} 
+            onChange={handleBulkStudentUpload} 
+            accept=".xlsx, .xls, .csv" 
+            className="hidden" 
+          />
+
+          {/* Section Header with Action Buttons */}
+          <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div>
-              <h3 className="text-base font-bold text-slate-800">Student Enrollment Roster</h3>
-              <p className="text-xs text-slate-400">Select class from dropdown to assign students cleanly.</p>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-800">Student Enrollment Roster</h3>
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                  {students.length} Total Enrolled
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">Filter by class or bulk-enroll students with Excel / CSV upload.</p>
             </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={handleDownloadStudentTemplate}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs shadow-xs transition-all"
+                title="Download Sample Student Enrollment Excel Template"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Template</span>
+              </button>
+
+              <button
+                onClick={() => studentFileInputRef.current?.click()}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200 text-emerald-800 font-bold text-xs shadow-xs transition-all"
+                title="Bulk enroll students via Excel or CSV"
+              >
+                <Upload className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Bulk Upload</span>
+              </button>
+
+              <button
+                onClick={handleOpenAddStudent}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-100 transition-all"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Add Student</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Interactive Class Filter Bar */}
+          <div className="px-4 sm:px-5 py-3 bg-slate-50/70 border-b border-slate-100 flex items-center gap-2 overflow-x-auto">
+            <span className="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0 flex items-center gap-1">
+              <Filter className="w-3 h-3 text-slate-400" />
+              <span>Class:</span>
+            </span>
+
             <button
-              onClick={handleOpenAddStudent}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-100 transition-all self-start sm:self-auto"
+              onClick={() => setSelectedClassFilter('all')}
+              className={`px-3 py-1 rounded-xl text-xs font-bold shrink-0 transition-all ${
+                selectedClassFilter === 'all'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+              }`}
             >
-              <UserPlus className="w-4 h-4" />
-              <span>Add New Student</span>
+              All Classes ({students.length})
             </button>
+
+            {schoolClasses.map(c => {
+              const count = students.filter(s => (s.className || 'Class 8-A') === c).length;
+              const isSelected = selectedClassFilter === c;
+              return (
+                <button
+                  key={c}
+                  onClick={() => setSelectedClassFilter(c)}
+                  className={`px-3 py-1 rounded-xl text-xs font-semibold shrink-0 transition-all ${
+                    isSelected
+                      ? 'bg-indigo-600 text-white font-bold shadow-xs'
+                      : count > 0
+                        ? 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 font-bold'
+                        : 'bg-white/60 border border-slate-200/60 text-slate-400 hover:bg-slate-100'
+                  }`}
+                >
+                  {c} <span className="opacity-75 text-[11px]">({count})</span>
+                </button>
+              );
+            })}
           </div>
 
           <div className="overflow-x-auto">
@@ -419,8 +736,11 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {students.map(st => (
-                  <tr key={st.rollNo} className="hover:bg-slate-50/70 transition-colors">
+                {(selectedClassFilter === 'all' 
+                  ? students 
+                  : students.filter(s => (s.className || 'Class 8-A') === selectedClassFilter)
+                ).map(st => (
+                  <tr key={`${st.className || '8A'}_${st.rollNo}`} className="hover:bg-slate-50/70 transition-colors">
                     <td className="py-3.5 px-4 sm:px-6 font-mono font-bold text-slate-500">
                       #{st.rollNo}
                     </td>
@@ -429,7 +749,7 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
                       <p className="text-[10px] text-slate-400 font-normal md:hidden">{st.parentEmail}</p>
                     </td>
                     <td className="py-3.5 px-3 sm:px-4 font-semibold text-slate-600">
-                      <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 font-bold text-[10px]">
+                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold text-[10px]">
                         {st.className || 'Class 8-A'}
                       </span>
                     </td>
@@ -461,6 +781,16 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
                 ))}
               </tbody>
             </table>
+            {(selectedClassFilter === 'all' 
+              ? students 
+              : students.filter(s => (s.className || 'Class 8-A') === selectedClassFilter)
+            ).length === 0 && (
+              <div className="p-8 text-center text-slate-400 flex flex-col items-center justify-center">
+                <Users className="w-10 h-10 text-slate-300 mb-2" />
+                <p className="text-xs font-bold text-slate-700">No students enrolled in {selectedClassFilter} yet</p>
+                <p className="text-[11px] text-slate-400 mt-1">Click &ldquo;Add Student&rdquo; or use &ldquo;Bulk Upload&rdquo; with the template to enroll students.</p>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -508,24 +838,13 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs font-semibold text-slate-600">Teacher Role</label>
-                  <select 
-                    value={teacherRole} 
-                    onChange={(e) => setTeacherRole(e.target.value)}
-                    className="w-full text-xs px-2.5 py-2 rounded-xl border border-slate-200 mt-1 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-medium"
-                  >
-                    <option value="class_teacher">Class Teacher</option>
-                    <option value="subject_teacher">Subject Teacher</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-slate-600">Subject</label>
+              <div>
+                <label className="text-xs font-semibold text-slate-600">Teaching Subject</label>
+                <div className="relative mt-1">
                   <select 
                     value={teacherSubject} 
                     onChange={(e) => setTeacherSubject(e.target.value)}
-                    className="w-full text-xs px-2.5 py-2 rounded-xl border border-slate-200 mt-1 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-medium"
+                    className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold text-slate-800 appearance-none pr-8 cursor-pointer"
                   >
                     <option value="Mathematics">Mathematics</option>
                     <option value="Science">Science</option>
@@ -533,20 +852,44 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
                     <option value="Social Studies">Social Studies</option>
                     <option value="Hindi">Hindi</option>
                   </select>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3 pointer-events-none" />
                 </div>
               </div>
 
-              <div>
-                <label className="text-xs font-semibold text-slate-600">Assigned Class</label>
-                <select
-                  value={teacherClass}
-                  onChange={(e) => setTeacherClass(e.target.value)}
-                  className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 mt-1 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-medium"
-                >
-                  {schoolClasses.map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
+              {/* Dual Role: Class Teacher Toggle Checkbox */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col gap-2.5">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={isClassTeacherChecked}
+                    onChange={(e) => setIsClassTeacherChecked(e.target.checked)}
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-800">Appointed as Class Teacher</span>
+                    <span className="text-[10px] text-slate-400">Can take attendance & issue report cards for this class</span>
+                  </div>
+                </label>
+
+                {isClassTeacherChecked && (
+                  <div className="pt-2 border-t border-slate-200/60 animate-in fade-in duration-150">
+                    <label className="text-[11px] font-semibold text-indigo-900 block mb-1">
+                      Assigned Class:
+                    </label>
+                    <div className="relative">
+                      <select
+                        value={teacherClass}
+                        onChange={(e) => setTeacherClass(e.target.value)}
+                        className="w-full text-xs px-3 py-2 rounded-xl border border-indigo-200 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold text-indigo-950 appearance-none pr-8 cursor-pointer"
+                      >
+                        {schoolClasses.map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="w-3.5 h-3.5 text-indigo-600 absolute right-3 top-2.5 pointer-events-none" />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Password field directly in editing form */}
@@ -636,15 +979,18 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
                 </div>
                 <div className="col-span-2">
                   <label className="text-xs font-semibold text-slate-600">Select Class</label>
-                  <select 
-                    value={studentClass} 
-                    onChange={(e) => setStudentClass(e.target.value)}
-                    className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 mt-1 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-medium"
-                  >
-                    {schoolClasses.map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
-                  </select>
+                  <div className="relative mt-1">
+                    <select 
+                      value={studentClass} 
+                      onChange={(e) => setStudentClass(e.target.value)}
+                      className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold text-slate-800 appearance-none pr-8 cursor-pointer"
+                    >
+                      {schoolClasses.map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5 pointer-events-none" />
+                  </div>
                 </div>
               </div>
 
@@ -766,6 +1112,94 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
                 className="py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-200"
               >
                 Yes, Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* CONFIRMATION MODAL: CLEAN SLATE (0 RECORDS)               */}
+      {/* ========================================================= */}
+      {isResetModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-slate-100 flex flex-col gap-4 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 mx-auto flex items-center justify-center">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="text-base font-bold text-slate-900">Initialize Clean Slate?</h4>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                This will delete <strong>all demo students, marks, attendance, and faculty accounts</strong> so you can onboard a brand-new school with 0 records. Your master Administrator login is preserved.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={() => setIsResetModalOpen(false)}
+                className="py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={handleCleanSlate}
+                className="py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-200 flex items-center justify-center gap-1.5"
+              >
+                {isResetting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Clearing...</span>
+                  </>
+                ) : (
+                  <span>Yes, Start at 0</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* CONFIRMATION MODAL: RESTORE DEMO DATA                     */}
+      {/* ========================================================= */}
+      {isDemoModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-slate-100 flex flex-col gap-4 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-600 mx-auto flex items-center justify-center">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="text-base font-bold text-slate-900">Restore Demo Presentation Data?</h4>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                This will reload the 10 sample students (Class 8-A), attendance logs, and demo teachers for demonstrations and client presentations.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={() => setIsDemoModalOpen(false)}
+                className="py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={handleRestoreDemo}
+                className="py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-200 flex items-center justify-center gap-1.5"
+              >
+                {isResetting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Restoring...</span>
+                  </>
+                ) : (
+                  <span>Restore Demo</span>
+                )}
               </button>
             </div>
           </div>

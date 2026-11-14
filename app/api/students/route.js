@@ -1,109 +1,15 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
+import { 
+  getSharedStudents, 
+  setSharedStudents, 
+  clearAllSharedStudents, 
+  resetToDemoStudents, 
+  DEMO_STUDENTS 
+} from '@/lib/studentsStore';
 
-// Fallback in-memory database: Exactly 10 Students for Class 8-A in MySchool
-let fallbackStudentsDB = [
-  {
-    rollNo: '01',
-    name: 'Aakash Verma',
-    className: 'Class 8-A',
-    parentEmail: 'parent.verma@example.com',
-    parentPhone: '9876543201',
-    attendance: 'P',
-    emailed: false,
-    marks: { maths: 21, science: 23, english: 20, social: 19, hindi: 22 }
-  },
-  {
-    rollNo: '02',
-    name: 'Ananya Gupta',
-    className: 'Class 8-A',
-    parentEmail: 'parent.gupta@example.com',
-    parentPhone: '9876543202',
-    attendance: 'P',
-    emailed: false,
-    marks: { maths: 25, science: 25, english: 24, social: 23, hindi: 24 }
-  },
-  {
-    rollNo: '03',
-    name: 'Devendra Patel',
-    className: 'Class 8-A',
-    parentEmail: 'parent.patel@example.com',
-    parentPhone: '9876543203',
-    attendance: 'A',
-    emailed: false,
-    marks: { maths: 15, science: 16, english: 14, social: 15, hindi: 17 }
-  },
-  {
-    rollNo: '04',
-    name: 'Diya Sen',
-    className: 'Class 8-A',
-    parentEmail: 'parent.sen@example.com',
-    parentPhone: '9876543204',
-    attendance: 'P',
-    emailed: false,
-    marks: { maths: 23, science: 22, english: 24, social: 21, hindi: 23 }
-  },
-  {
-    rollNo: '05',
-    name: 'Ishaan Reddy',
-    className: 'Class 8-A',
-    parentEmail: 'parent.reddy@example.com',
-    parentPhone: '9876543205',
-    attendance: 'A',
-    emailed: false,
-    marks: { maths: 12, science: 13, english: 15, social: 11, hindi: 14 }
-  },
-  {
-    rollNo: '06',
-    name: 'Kavya Nair',
-    className: 'Class 8-A',
-    parentEmail: 'parent.nair@example.com',
-    parentPhone: '9876543206',
-    attendance: 'P',
-    emailed: false,
-    marks: { maths: 22, science: 24, english: 23, social: 22, hindi: 21 }
-  },
-  {
-    rollNo: '07',
-    name: 'Manish Kumar',
-    className: 'Class 8-A',
-    parentEmail: 'parent.kumar@example.com',
-    parentPhone: '9876543207',
-    attendance: 'P',
-    emailed: false,
-    marks: { maths: 18, science: 19, english: 17, social: 18, hindi: 20 }
-  },
-  {
-    rollNo: '08',
-    name: 'Meera Iyer',
-    className: 'Class 8-A',
-    parentEmail: 'parent.iyer@example.com',
-    parentPhone: '9876543208',
-    attendance: 'P',
-    emailed: false,
-    marks: { maths: 24, science: 25, english: 23, social: 24, hindi: 25 }
-  },
-  {
-    rollNo: '09',
-    name: 'Rohan Joshi',
-    className: 'Class 8-A',
-    parentEmail: 'parent.joshi@example.com',
-    parentPhone: '9876543209',
-    attendance: 'P',
-    emailed: false,
-    marks: { maths: 19, science: 20, english: 18, social: 19, hindi: 21 }
-  },
-  {
-    rollNo: '10',
-    name: 'Tanvi Deshmukh',
-    className: 'Class 8-A',
-    parentEmail: 'parent.deshmukh@example.com',
-    parentPhone: '9876543210',
-    attendance: 'P',
-    emailed: false,
-    marks: { maths: 23, science: 24, english: 22, social: 23, hindi: 24 }
-  }
-];
+// Fallback in-memory database synced across routes
+let fallbackStudentsDB = getSharedStudents();
 
 // In-memory fallback history per date (YYYY-MM-DD -> { [rollNo]: 'P' | 'A' })
 let fallbackAttendanceHistory = {};
@@ -130,7 +36,18 @@ export async function GET() {
       .select('id, roll_no, name, parent_email, parent_phone, class_name')
       .order('roll_no', { ascending: true });
 
-    if (!studentsError && studentsData && studentsData.length > 0) {
+    // When Supabase responds without error:
+    // If the school has 0 students (clean database), return an empty array [] without falling back to demo data!
+    if (!studentsError && Array.isArray(studentsData)) {
+      if (studentsData.length === 0) {
+        return NextResponse.json({ 
+          success: true, 
+          data: [], 
+          attendanceHistory: {},
+          source: 'supabase' 
+        });
+      }
+
       // Fetch marks
       const { data: marksData } = await supabase
         .from('marks')
@@ -213,6 +130,46 @@ export async function POST(request) {
     const { action, updates, students, student } = body;
     const today = getTodayDateStr();
 
+    // 0. Clean Slate: Clear all students & records (for new school onboarding)
+    if (action === 'admin_clear_all_students') {
+      try {
+        await supabase.from('attendance').delete().neq('status', '__never_match__');
+        await supabase.from('marks').delete().neq('subject', '__never_match__');
+        await supabase.from('students').delete().neq('roll_no', '__never_match__');
+      } catch (e) {
+        console.warn('Supabase clear all students error:', e);
+      }
+
+      fallbackStudentsDB = [];
+      clearAllSharedStudents();
+      fallbackAttendanceHistory = {};
+
+      return NextResponse.json({ 
+        success: true, 
+        count: 0, 
+        message: 'All student records, marks, and attendance cleared. Ready for fresh onboarding!' 
+      });
+    }
+
+    // 0.5 Restore Demo Students (for quick sales demos)
+    if (action === 'admin_load_demo_students') {
+      fallbackStudentsDB = [...DEMO_STUDENTS];
+      resetToDemoStudents();
+      fallbackAttendanceHistory = {};
+      const t = getTodayDateStr();
+      fallbackAttendanceHistory[t] = {};
+      fallbackStudentsDB.forEach(s => {
+        fallbackAttendanceHistory[t][s.rollNo] = s.attendance || 'P';
+      });
+
+      return NextResponse.json({ 
+        success: true, 
+        count: fallbackStudentsDB.length, 
+        data: fallbackStudentsDB,
+        message: 'Demo students restored successfully.' 
+      });
+    }
+
     // 1. Admin Adds a Student
     if (action === 'admin_add_student' && student) {
       const newSt = {
@@ -257,6 +214,58 @@ export async function POST(request) {
       });
 
       return NextResponse.json({ success: true });
+    }
+
+    // 1.5 Admin Bulk Add Students (Multiple students for any class)
+    if (action === 'admin_bulk_add_students' && Array.isArray(body.students)) {
+      const incoming = body.students;
+      for (const st of incoming) {
+        try {
+          const { data } = await supabase
+            .from('students')
+            .upsert({
+              roll_no: st.rollNo,
+              name: st.name,
+              class_name: st.className || 'Class 8-A',
+              parent_email: st.parentEmail || '',
+              parent_phone: st.parentPhone || ''
+            }, { onConflict: 'roll_no' })
+            .select()
+            .single();
+
+          if (data) {
+            const defaultSubjects = ['maths', 'science', 'english', 'social', 'hindi'];
+            for (const sub of defaultSubjects) {
+              await supabase.from('marks').upsert({
+                student_id: data.id,
+                subject: sub,
+                exam: 'Unit Test 1',
+                score: st.marks?.[sub] ?? 0,
+                max_score: 25
+              }, { onConflict: 'student_id,subject,exam' });
+            }
+          }
+        } catch (e) {}
+
+        const existsIdx = fallbackStudentsDB.findIndex(s => s.rollNo === st.rollNo && (s.className || 'Class 8-A') === (st.className || 'Class 8-A'));
+        const newRecord = {
+          rollNo: st.rollNo,
+          name: st.name,
+          className: st.className || 'Class 8-A',
+          parentEmail: st.parentEmail || '',
+          parentPhone: st.parentPhone || '',
+          attendance: 'P',
+          emailed: false,
+          marks: st.marks || { maths: 0, science: 0, english: 0, social: 0, hindi: 0 }
+        };
+        if (existsIdx !== -1) {
+          fallbackStudentsDB[existsIdx] = newRecord;
+        } else {
+          fallbackStudentsDB.push(newRecord);
+        }
+      }
+
+      return NextResponse.json({ success: true, count: incoming.length });
     }
 
     // 2. Admin Updates a Student

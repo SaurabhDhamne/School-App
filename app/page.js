@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import Navbar from '@/components/Navbar';
 import Toast from '@/components/Toast';
@@ -15,10 +15,25 @@ import EmailModal from '@/components/EmailModal';
 import AuthModal from '@/components/AuthModal';
 import ProfileModal from '@/components/ProfileModal';
 import HomeworkSection from '@/components/HomeworkSection';
+import ParentPortalView from '@/components/ParentPortalView';
+import { getSchoolConfig } from '@/lib/schoolConfig';
 
 export default function App() {
   // Navigation: 'home' | 'attendance' | 'marksheet' | 'admin'
   const [activeTab, setActiveTab] = useState('home');
+
+  // School Configuration & Multi-Class Architecture
+  const [schoolConfig, setSchoolConfig] = useState(() => getSchoolConfig());
+  const [selectedClass, setSelectedClass] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('edusnap_user');
+      if (savedUser) {
+        const u = JSON.parse(savedUser);
+        if (u.classTeacherOf && u.classTeacherOf !== 'All Classes') return u.classTeacherOf;
+      }
+    } catch (e) {}
+    return 'Class 8-A';
+  });
 
   // Authentication State
   const [currentUser, setCurrentUser] = useState(null);
@@ -28,6 +43,28 @@ export default function App() {
   // Student Roster & Marksheet
   const [students, setStudents] = useState([]);
   const [currentSubjectFilter, setCurrentSubjectFilter] = useState('all');
+
+  // Filtered Students strictly for the active class
+  const classStudents = useMemo(() => {
+    return students.filter(s => (s.className || 'Class 8-A') === selectedClass);
+  }, [students, selectedClass]);
+
+  // Dynamic Teacher Context for Selected Class
+  const isClassTeacherOfActiveClass = currentUser?.role === 'admin' || (currentUser?.classTeacherOf && currentUser.classTeacherOf === selectedClass);
+
+  const effectiveUser = useMemo(() => {
+    if (!currentUser) return null;
+    return {
+      ...currentUser,
+      isClassTeacherOfActiveClass,
+      effectiveRole: isClassTeacherOfActiveClass ? 'class_teacher' : 'subject_teacher',
+      displayRole: currentUser.role === 'admin' 
+        ? 'School Administrator'
+        : isClassTeacherOfActiveClass 
+          ? `Class Teacher (${selectedClass})` 
+          : `${currentUser.subject || 'Subject'} Teacher (${selectedClass})`
+    };
+  }, [currentUser, selectedClass, isClassTeacherOfActiveClass]);
 
   // Date-based Attendance State
   const [selectedAttendanceDate, setSelectedAttendanceDate] = useState(() => {
@@ -146,9 +183,9 @@ export default function App() {
     // 1. Immediately load cached students from localStorage so UI never flashes empty
     try {
       const cached = localStorage.getItem('myschool_students_cache');
-      if (cached) {
+      if (cached !== null) {
         const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           setStudents(parsed);
         }
       }
@@ -158,7 +195,7 @@ export default function App() {
     try {
       const res = await fetch('/api/students');
       const json = await res.json();
-      if (json.success && json.data) {
+      if (json.success && Array.isArray(json.data)) {
         setStudents(json.data);
         localStorage.setItem('myschool_students_cache', JSON.stringify(json.data));
       }
@@ -179,6 +216,15 @@ export default function App() {
   const handleLoginSuccess = (user) => {
     setCurrentUser(user);
     localStorage.setItem('edusnap_user', JSON.stringify(user));
+    if (user.role === 'parent') {
+      if (user.student?.className) {
+        setSelectedClass(user.student.className);
+      }
+      return;
+    }
+    if (user.classTeacherOf && user.classTeacherOf !== 'All Classes') {
+      setSelectedClass(user.classTeacherOf);
+    }
     if (user.role === 'admin') {
       setActiveTab('admin');
     } else {
@@ -259,10 +305,10 @@ export default function App() {
     }
   };
 
-  // Update Marks with Role Permission Enforcement
+  // Update Marks with Dynamic Class & Subject Permission Enforcement
   const updateSubjectMark = async (rollNo, subjectKey, val) => {
-    if (currentUser?.role === 'subject_teacher') {
-      const userSub = (currentUser.subject || '').toLowerCase();
+    if (!effectiveUser?.isClassTeacherOfActiveClass && effectiveUser?.role !== 'admin') {
+      const userSub = (currentUser?.subject || '').toLowerCase();
       let match = userSub === subjectKey.toLowerCase();
       if (userSub.includes('science') && subjectKey === 'science') match = true;
       if (userSub.includes('math') && subjectKey === 'maths') match = true;
@@ -271,7 +317,7 @@ export default function App() {
       if (userSub.includes('hindi') && subjectKey === 'hindi') match = true;
 
       if (!match) {
-        showToast(`🔒 Access restricted: Only ${currentUser.subject} teacher can edit.`);
+        showToast(`🔒 Access restricted: In ${selectedClass}, only the ${currentUser?.subject || 'assigned subject'} teacher can edit.`);
         return;
       }
     }
@@ -422,25 +468,25 @@ export default function App() {
     setIsScanModalOpen(true);
   };
 
-  // Export Full Marksheet CSV
+  // Export Full Marksheet CSV for Active Class
   const handleExportMarksheetCSV = () => {
-    const headers = "Roll No,Name,Parent Email,Maths (25),Science (25),English (25),Social (25),Hindi (25),Total (125),Percentage %,Grade\n";
-    const rows = students.map(s => {
+    const headers = "Roll No,Name,Class,Parent Email,Maths (25),Science (25),English (25),Social (25),Hindi (25),Total (125),Percentage %,Grade\n";
+    const rows = classStudents.map(s => {
       const tot = calculateStudentTotal(s.marks);
       const pct = calculateStudentPercentage(s.marks);
       const gr = getStudentGrade(pct).grade;
-      return `"${s.rollNo}","${s.name}","${s.parentEmail}",${s.marks.maths ?? 0},${s.marks.science ?? 0},${s.marks.english ?? 0},${s.marks.social ?? 0},${s.marks.hindi ?? 0},${tot},${pct}%,${gr}`;
+      return `"${s.rollNo}","${s.name}","${selectedClass}","${s.parentEmail}",${s.marks.maths ?? 0},${s.marks.science ?? 0},${s.marks.english ?? 0},${s.marks.social ?? 0},${s.marks.hindi ?? 0},${tot},${pct}%,${gr}`;
     }).join("\n");
 
     const blob = new Blob([headers + rows], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `Class_8A_Marksheet_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `${selectedClass.replace(/\s+/g, '_')}_Marksheet_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    showToast("📊 Full marksheet exported to CSV!");
+    showToast(`📊 ${selectedClass} marksheet exported to CSV!`);
   };
 
   // Download Sample Excel Template
@@ -612,8 +658,37 @@ export default function App() {
           isGatePage={true}
           onLoginSuccess={handleLoginSuccess}
           showToast={showToast}
+          students={students}
         />
       </div>
+    );
+  }
+
+  // ==============================================================
+  // DEDICATED PARENT PORTAL: CHILD ATTENDANCE & CLASS HOMEWORK ONLY
+  // ==============================================================
+  if (currentUser.role === 'parent') {
+    return (
+      <>
+        <Toast message={toastMessage} />
+        <ParentPortalView 
+          currentUser={currentUser}
+          student={currentUser.student}
+          attendanceHistory={attendanceHistory}
+          students={students}
+          onLogout={handleLogout}
+          onOpenProfileModal={() => setIsProfileModalOpen(true)}
+          showToast={showToast}
+          schoolConfig={schoolConfig}
+        />
+        <ProfileModal 
+          isOpen={isProfileModalOpen}
+          onClose={() => setIsProfileModalOpen(false)}
+          currentUser={currentUser}
+          onLogout={handleLogout}
+          showToast={showToast}
+        />
+      </>
     );
   }
 
@@ -632,11 +707,15 @@ export default function App() {
       {/* Global Toast */}
       <Toast message={toastMessage} />
 
-      {/* Top Navbar & Header */}
+      {/* Top Navbar & Header with Class Switcher */}
       <Navbar 
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        currentUser={currentUser}
+        currentUser={effectiveUser}
+        selectedClass={selectedClass}
+        onChangeClass={setSelectedClass}
+        availableClasses={schoolConfig.classes}
+        schoolConfig={schoolConfig}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onOpenProfileModal={() => setIsProfileModalOpen(true)}
       />
@@ -645,8 +724,9 @@ export default function App() {
       <main className="flex-1 pb-16">
         {activeTab === 'home' && (
           <DashboardTab 
-            currentUser={currentUser}
-            students={students}
+            currentUser={effectiveUser}
+            students={classStudents}
+            selectedClass={selectedClass}
             onNavigate={setActiveTab}
             onOpenScanModal={handleOpenScan}
             onOpenEmailAll={handleOpenEmailAll}
@@ -659,7 +739,8 @@ export default function App() {
 
         {activeTab === 'attendance' && (
           <AttendanceTab 
-            students={students}
+            students={classStudents}
+            selectedClass={selectedClass}
             selectedDate={selectedAttendanceDate}
             onChangeDate={setSelectedAttendanceDate}
             attendanceHistory={attendanceHistory}
@@ -668,17 +749,18 @@ export default function App() {
             onOpenExportModal={() => setIsExportModalOpen(true)}
             onOpenEmailSingle={handleOpenEmailSingle}
             onOpenEmailAll={handleOpenEmailAll}
-            currentUser={currentUser}
+            currentUser={effectiveUser}
           />
         )}
 
         {activeTab === 'marksheet' && (
           <MarksheetTab 
-            students={students}
+            students={classStudents}
+            selectedClass={selectedClass}
             subjects={subjects}
             currentSubjectFilter={currentSubjectFilter}
             setCurrentSubjectFilter={setCurrentSubjectFilter}
-            currentUser={currentUser}
+            currentUser={effectiveUser}
             onUpdateMark={updateSubjectMark}
             onOpenScanModal={handleOpenScan}
             onTriggerExcelImport={() => fileInputRef.current?.click()}
@@ -695,7 +777,8 @@ export default function App() {
 
         {activeTab === 'homework' && (
           <HomeworkSection 
-            currentUser={currentUser} 
+            currentUser={effectiveUser} 
+            selectedClass={selectedClass}
             showToast={showToast} 
             isFullPage={true} 
           />
@@ -726,16 +809,17 @@ export default function App() {
         onClose={() => setIsAuthModalOpen(false)}
         onLoginSuccess={handleLoginSuccess}
         showToast={showToast}
+        students={students}
       />
 
       <ScanModal 
         isOpen={isScanModalOpen}
         onClose={() => setIsScanModalOpen(false)}
         initialType={scanInitialType}
-        students={students}
+        students={classStudents}
         selectedDate={selectedAttendanceDate}
         onApplyData={handleApplyAiData}
-        currentUser={currentUser}
+        currentUser={effectiveUser}
         showToast={showToast}
       />
 
@@ -743,7 +827,7 @@ export default function App() {
       <ExportAttendanceModal 
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
-        students={students}
+        students={classStudents}
         selectedDate={selectedAttendanceDate}
         attendanceHistory={attendanceHistory}
         onExportToast={showToast}

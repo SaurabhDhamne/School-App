@@ -43,6 +43,9 @@ export default function ProfileModal({ isOpen, onClose, currentUser, onLogout, s
         body: JSON.stringify({
           action: 'change_password',
           userId: currentUser.id,
+          role: currentUser.role,
+          studentRollNo: currentUser.student?.rollNo,
+          studentClass: currentUser.student?.className,
           newPassword
         })
       });
@@ -95,26 +98,32 @@ export default function ProfileModal({ isOpen, onClose, currentUser, onLogout, s
             </span>
             <p className="font-bold text-slate-800">
               {isAdmin ? 'School Administrator' : (
-                currentUser.role === 'class_teacher' ? 'Class Teacher' : 'Subject Teacher'
+                currentUser.role === 'parent' ? 'Parent / Guardian' : (
+                  currentUser.role === 'class_teacher' ? 'Class Teacher' : 'Subject Teacher'
+                )
               )}
             </p>
           </div>
 
           <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-              Assigned Class
+              {currentUser.role === 'parent' ? 'Child Name' : 'Assigned Class'}
             </span>
             <p className="font-bold text-slate-800">
-              {currentUser.classTeacherOf || 'Class 8-A'}
+              {currentUser.role === 'parent' 
+                ? `${currentUser.student?.name || 'Child'} (#${currentUser.student?.rollNo || '01'})`
+                : (currentUser.classTeacherOf || 'Class 8-A')}
             </p>
           </div>
 
           <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80">
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-              Assigned Subject
+              {currentUser.role === 'parent' ? 'Child Class' : 'Assigned Subject'}
             </span>
             <p className="font-bold text-slate-800">
-              {currentUser.subject || 'All Subjects'}
+              {currentUser.role === 'parent' 
+                ? (currentUser.student?.className || 'Class 8-A') 
+                : (currentUser.subject || 'All Subjects')}
             </p>
           </div>
 

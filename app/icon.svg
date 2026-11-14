@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5" />
+      <stop offset="100%" stop-color="#312E81" />
+    </linearGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FCD34D" />
+      <stop offset="100%" stop-color="#F59E0B" />
+    </linearGradient>
+  </defs>
+  <!-- Rounded App Icon Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <!-- Inner Academic Shield -->
+  <path d="M256 80 L384 136 V248 C384 328 328 396 256 424 C184 396 128 328 128 248 V136 Z" fill="none" stroke="#FFFFFF" stroke-width="14" stroke-opacity="0.3" />
+  <!-- Graduation Cap -->
+  <path d="M256 160 L384 224 L256 288 L128 224 Z" fill="url(#gold)" />
+  <path d="M176 254 V310 C176 342 212 368 256 368 C300 368 336 342 336 310 V254 L256 294 Z" fill="#FBBF24" />
+  <!-- Tassel -->
+  <path d="M352 238 V320" stroke="#FDE68A" stroke-width="8" stroke-linecap="round" />
+  <circle cx="352" cy="326" r="8" fill="#F59E0B" />
+</svg>

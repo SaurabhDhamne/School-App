@@ -18,6 +18,7 @@ import {
 
 export default function MarksheetTab({
   students,
+  selectedClass = 'Class 8-A',
   subjects,
   currentSubjectFilter,
   setCurrentSubjectFilter,
@@ -42,21 +43,20 @@ export default function MarksheetTab({
   );
 
   // Strict Permission Check:
-  // - Admin & Class Teacher can edit all subjects
-  // - Subject Teacher can ONLY edit their own subject
+  // - Admin & Class Teacher of active class can edit all subjects
+  // - In another class where teacher is not Class Teacher, they can ONLY edit their own subject
   const canEditSubject = (subjectKey) => {
     if (!currentUser) return false;
-    if (currentUser.role === 'admin' || currentUser.role === 'class_teacher') return true;
-    if (currentUser.role === 'subject_teacher') {
-      const userSub = (currentUser.subject || '').toLowerCase();
-      if (userSub.includes('math') && subjectKey === 'maths') return true;
-      if (userSub.includes('science') && subjectKey === 'science') return true;
-      if (userSub.includes('english') && subjectKey === 'english') return true;
-      if (userSub.includes('social') && subjectKey === 'social') return true;
-      if (userSub.includes('hindi') && subjectKey === 'hindi') return true;
-      return userSub === subjectKey.toLowerCase();
-    }
-    return false;
+    if (currentUser.role === 'admin' || currentUser.isClassTeacherOfActiveClass) return true;
+    if (currentUser.role === 'class_teacher' && (!currentUser.classTeacherOf || currentUser.classTeacherOf === selectedClass)) return true;
+    
+    const userSub = (currentUser.subject || '').toLowerCase();
+    if (userSub.includes('math') && subjectKey === 'maths') return true;
+    if (userSub.includes('science') && subjectKey === 'science') return true;
+    if (userSub.includes('english') && subjectKey === 'english') return true;
+    if (userSub.includes('social') && subjectKey === 'social') return true;
+    if (userSub.includes('hindi') && subjectKey === 'hindi') return true;
+    return userSub === subjectKey.toLowerCase();
   };
 
   return (
@@ -72,11 +72,9 @@ export default function MarksheetTab({
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
-            {currentUser?.role === 'class_teacher' 
-              ? '👑 Class Teacher: Full editing rights across all subjects'
-              : currentUser?.role === 'subject_teacher'
-                ? `🔒 ${currentUser.subject} Teacher: You can edit ${currentUser.subject} marks only`
-                : 'School Gradebook'}
+            {currentUser?.role === 'admin' || currentUser?.isClassTeacherOfActiveClass
+              ? `👑 Class Teacher (${selectedClass}): Full editing rights across all subjects`
+              : `🔒 ${currentUser?.subject || 'Subject'} Teacher (${selectedClass}): You can edit ${currentUser?.subject} marks only`}
           </p>
         </div>
 
@@ -395,6 +393,13 @@ export default function MarksheetTab({
               })}
             </tbody>
           </table>
+          {filteredStudents.length === 0 && (
+            <div className="py-12 text-center text-slate-400 flex flex-col items-center justify-center gap-2">
+              <FileSpreadsheet className="w-8 h-8 text-slate-300" />
+              <p className="font-bold text-slate-700 text-xs">No students enrolled in {selectedClass} yet</p>
+              <p className="text-[11px] text-slate-400">Add students or bulk-upload via Excel in the Admin tab to enter marks.</p>
+            </div>
+          )}
         </div>
       </div>
 

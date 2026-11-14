@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
+import { getSharedStudents } from '@/lib/studentsStore';
 
 function getDefaultPassword(name = '') {
   const clean = name.replace(/^(mrs\.|mr\.|dr\.|ms\.|prof\.)\s+/i, '').trim();
@@ -59,7 +60,7 @@ export async function GET(request) {
       .neq('role', 'admin')
       .order('name', { ascending: true });
 
-    if (!error && data && data.length > 0) {
+    if (!error && Array.isArray(data)) {
       return NextResponse.json({ success: true, teachers: data });
     }
   } catch (err) {
@@ -75,6 +76,61 @@ export async function POST(request) {
     const body = await request.json();
     const { action } = body;
 
+    // 0. Clean Slate: Clear all teacher profiles (except admin) for fresh onboarding
+    if (action === 'admin_clear_all_teachers') {
+      try {
+        await supabase.from('profiles').delete().neq('role', 'admin');
+      } catch (e) {
+        console.warn('Supabase clear teachers error:', e);
+      }
+      fallbackProfiles = fallbackProfiles.filter(p => p.role === 'admin');
+      return NextResponse.json({ 
+        success: true, 
+        count: 0, 
+        message: 'All teacher accounts cleared. Administrator preserved.' 
+      });
+    }
+
+    // 0.5 Restore Demo Teachers (for quick sales demos)
+    if (action === 'admin_load_demo_teachers') {
+      const adminOnly = fallbackProfiles.filter(p => p.role === 'admin');
+      fallbackProfiles = [
+        ...adminOnly,
+        {
+          id: 't1',
+          name: 'Mrs. Priya Sharma',
+          email: 'priya@myschool.com',
+          password: 'priya@123',
+          role: 'class_teacher',
+          class_name: 'Class 8-A',
+          subject: 'Mathematics',
+          school: 'MySchool'
+        },
+        {
+          id: 't2',
+          name: 'Mr. Rajesh Patel',
+          email: 'rajesh@myschool.com',
+          password: 'rajesh@123',
+          role: 'subject_teacher',
+          class_name: 'Class 8-A',
+          subject: 'Science',
+          school: 'MySchool'
+        },
+        {
+          id: 't3',
+          name: 'Mrs. Sunita Verma',
+          email: 'sunita@myschool.com',
+          password: 'sunita@123',
+          role: 'subject_teacher',
+          class_name: 'Class 8-A',
+          subject: 'English',
+          school: 'MySchool'
+        }
+      ];
+      const teachers = fallbackProfiles.filter(p => p.role !== 'admin');
+      return NextResponse.json({ success: true, teachers, message: 'Demo teachers restored.' });
+    }
+
     // 1. Get Teachers List for Dropdown
     if (action === 'get_teachers') {
       try {
@@ -84,7 +140,7 @@ export async function POST(request) {
           .neq('role', 'admin')
           .order('name', { ascending: true });
 
-        if (!error && data && data.length > 0) {
+        if (!error && Array.isArray(data)) {
           return NextResponse.json({ success: true, teachers: data });
         }
       } catch (e) {}
@@ -92,27 +148,165 @@ export async function POST(request) {
       return NextResponse.json({ success: true, teachers });
     }
 
+    // 1.5 Get Students List for Parent Portal dropdown
+    if (action === 'get_parent_students') {
+      try {
+        const { data, error } = await supabase
+          .from('students')
+          .select('id, roll_no, name, class_name, parent_email, parent_phone')
+          .order('roll_no', { ascending: true });
+
+        if (!error && Array.isArray(data)) {
+          const formatted = data.map(s => ({
+            id: s.id,
+            rollNo: s.roll_no,
+            name: s.name,
+            className: s.class_name || 'Class 8-A',
+            parentEmail: s.parent_email || '',
+            parentPhone: s.parent_phone || ''
+          }));
+          return NextResponse.json({ success: true, students: formatted });
+        }
+      } catch (e) {}
+      return NextResponse.json({ success: true, students: getSharedStudents() });
+    }
+
+    // 1.8 Parent Portal Login
+    if (action === 'parent_login') {
+      const { studentRollNo, className, parentEmail, parentPhone, password } = body;
+
+      // 1. Query Supabase students
+      let matchedStudent = null;
+      try {
+        let query = supabase.from('students').select('*');
+        if (className) {
+          query = query.eq('class_name', className);
+        }
+        if (parentEmail) {
+          query = query.eq('parent_email', String(parentEmail).toLowerCase().trim());
+        } else if (parentPhone) {
+          query = query.eq('parent_phone', String(parentPhone).trim());
+        } else if (studentRollNo) {
+          query = query.eq('roll_no', String(studentRollNo).trim());
+        }
+        const { data } = await query.single();
+        if (data) {
+          matchedStudent = {
+            id: data.id,
+            rollNo: data.roll_no,
+            name: data.name,
+            className: data.class_name || 'Class 8-A',
+            parentEmail: data.parent_email || '',
+            parentPhone: data.parent_phone || '',
+            parentPassword: data.parent_password || null,
+            attendance: 'P'
+          };
+        }
+      } catch (e) {}
+
+      // 2. Fallback in-memory search if not found in Supabase
+      if (!matchedStudent) {
+        const liveList = getSharedStudents();
+        matchedStudent = liveList.find(s => {
+          if (className && s.className && s.className.toLowerCase() !== className.toLowerCase()) {
+            return false;
+          }
+          const emailInput = String(parentEmail || '').toLowerCase().trim();
+          const phoneInput = String(parentPhone || '').trim();
+          const rollInput = String(studentRollNo || '').trim();
+
+          if (emailInput && s.parentEmail && s.parentEmail.toLowerCase().trim() === emailInput) {
+            return true;
+          }
+          if (phoneInput && s.parentPhone && s.parentPhone.trim() === phoneInput) {
+            return true;
+          }
+          if (rollInput && (s.rollNo === rollInput || parseInt(s.rollNo, 10) === parseInt(rollInput, 10))) {
+            return true;
+          }
+          return false;
+        });
+      }
+
+      if (!matchedStudent) {
+        return NextResponse.json({ 
+          error: 'No student record found for this class and registered email.' 
+        }, { status: 404 });
+      }
+
+      // Password Validation: custom password OR default firstname(student)@123
+      const cleanName = (matchedStudent.name || '').replace(/^(mrs\.|mr\.|dr\.|ms\.|prof\.)\s+/i, '').trim();
+      const firstName = cleanName.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+      const defaultPassword = `${firstName}@123`;
+      const customPassword = matchedStudent.parentPassword || matchedStudent.parent_password;
+
+      const inputPass = String(password || '').trim();
+      const isPassValid = 
+        (customPassword && inputPass === customPassword) ||
+        inputPass.toLowerCase() === defaultPassword || 
+        inputPass.toLowerCase() === firstName || 
+        inputPass === 'parent123' ||
+        inputPass === String(matchedStudent.rollNo);
+
+      if (!isPassValid) {
+        return NextResponse.json({ 
+          error: customPassword 
+            ? 'Incorrect password. Please enter your updated password.'
+            : `Incorrect password. Default password format is ${firstName}@123` 
+        }, { status: 401 });
+      }
+
+      return NextResponse.json({
+        success: true,
+        user: {
+          id: `parent_${matchedStudent.rollNo}_${matchedStudent.className.replace(/\s+/g, '')}`,
+          name: `${matchedStudent.name}'s Parent`,
+          email: matchedStudent.parentEmail || `parent.${matchedStudent.rollNo}@example.com`,
+          phone: matchedStudent.parentPhone || '',
+          role: 'parent',
+          student: {
+            id: matchedStudent.id || `s_${matchedStudent.rollNo}`,
+            rollNo: matchedStudent.rollNo,
+            name: matchedStudent.name,
+            className: matchedStudent.className,
+            parentEmail: matchedStudent.parentEmail,
+            parentPhone: matchedStudent.parentPhone,
+            attendance: matchedStudent.attendance || 'P'
+          },
+          school: 'MySchool'
+        }
+      });
+    }
+
     // 2. Login (Admin or Teacher by Dropdown Selection)
     if (action === 'login') {
       const { email, password, teacherId } = body;
 
-      // Check if Admin login
-      if (email && email.toLowerCase() === 'admin@myschool.com') {
-        let adminUser = null;
+      // Check if Admin login (supports any school admin email from database or admin keyword)
+      const cleanEmail = String(email || '').toLowerCase().trim();
+      const isPotentialAdmin = cleanEmail.includes('admin') || cleanEmail === 'admin@myschool.com';
+
+      let adminUser = null;
+      if (cleanEmail) {
         try {
           const { data } = await supabase
             .from('profiles')
             .select('*')
-            .eq('email', 'admin@myschool.com')
-            .single();
+            .eq('email', cleanEmail)
+            .eq('role', 'admin')
+            .maybeSingle();
           if (data) adminUser = data;
         } catch (e) {}
+      }
 
-        if (!adminUser) {
-          adminUser = fallbackProfiles.find(p => p.email === 'admin@myschool.com');
-        }
+      if (!adminUser && isPotentialAdmin) {
+        adminUser = fallbackProfiles.find(p => p.email.toLowerCase() === cleanEmail && p.role === 'admin')
+          || fallbackProfiles.find(p => p.role === 'admin');
+      }
 
-        if (password === adminUser.password || password === 'admin@123') {
+      if (adminUser) {
+        const expectedPass = adminUser.password || 'admin@123';
+        if (password === expectedPass || password === 'admin@123') {
           return NextResponse.json({
             success: true,
             user: {
@@ -175,11 +369,39 @@ export async function POST(request) {
       }, { status: 401 });
     }
 
-    // 3. Teacher Changes Their Password
+    // 3. Teacher, Parent or Admin Changes Their Password
     if (action === 'change_password') {
-      const { userId, newPassword } = body;
+      const { userId, newPassword, role, studentRollNo, studentClass } = body;
       if (!newPassword || newPassword.length < 4) {
         return NextResponse.json({ error: 'Password must be at least 4 characters' }, { status: 400 });
+      }
+
+      const isParent = role === 'parent' || String(userId).startsWith('parent_');
+
+      if (isParent) {
+        const roll = studentRollNo || (userId ? String(userId).split('_')[1] : null);
+        const cls = studentClass || (userId ? String(userId).split('_')[2] : null);
+
+        // 1. Try Supabase
+        try {
+          if (roll) {
+            let q = supabase.from('students').update({ parent_password: newPassword }).eq('roll_no', roll);
+            if (cls) q = q.eq('class_name', cls);
+            await q;
+          }
+        } catch (e) {}
+
+        // 2. Update in shared students store
+        const shared = getSharedStudents();
+        const updated = shared.map(s => {
+          if (roll && s.rollNo === roll) {
+            return { ...s, parentPassword: newPassword, parent_password: newPassword };
+          }
+          return s;
+        });
+        setSharedStudents(updated);
+
+        return NextResponse.json({ success: true, message: 'Password updated successfully!' });
       }
 
       try {

@@ -23,7 +23,8 @@ import {
   Search,
   Filter,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  ChevronDown
 } from 'lucide-react';
 
 const STORAGE_KEY = 'myschool_homework_posts';
@@ -31,6 +32,7 @@ const STORAGE_KEY = 'myschool_homework_posts';
 const INITIAL_DEFAULT_POSTS = [
   {
     id: 'hw_1',
+    className: 'Class 8-A',
     subject: 'Mathematics',
     teacherName: 'Mrs. Priya Sharma',
     teacherRole: 'class_teacher',
@@ -49,6 +51,7 @@ const INITIAL_DEFAULT_POSTS = [
   },
   {
     id: 'hw_2',
+    className: 'Class 8-A',
     subject: 'Science',
     teacherName: 'Mr. Rajesh Patel',
     teacherRole: 'subject_teacher',
@@ -71,6 +74,7 @@ function formatFileSize(bytes) {
 
 export default function HomeworkSection({ 
   currentUser, 
+  selectedClass = 'Class 8-A',
   showToast, 
   isFullPage = false,
   onNavigateToHomework 
@@ -144,9 +148,9 @@ export default function HomeworkSection({
   useEffect(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
+      if (saved !== null) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        if (Array.isArray(parsed)) {
           setHomeworkList(parsed);
           return;
         }
@@ -155,7 +159,7 @@ export default function HomeworkSection({
       localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_DEFAULT_POSTS));
     } catch (e) {
       console.warn('LocalStorage read error:', e);
-      setHomeworkList(INITIAL_DEFAULT_POSTS);
+      setHomeworkList([]);
     }
   }, []);
 
@@ -206,6 +210,7 @@ export default function HomeworkSection({
 
     const newPost = {
       id: `hw_${Date.now()}`,
+      className: selectedClass || 'Class 8-A',
       subject: currentUser?.role === 'subject_teacher' ? currentUser.subject : subject,
       teacherName: currentUser?.name || 'Class Teacher',
       teacherRole: currentUser?.role || 'class_teacher',
@@ -247,8 +252,12 @@ export default function HomeworkSection({
     }
   };
 
-  // Filtered List
+  // Filtered List for active class
   const filteredList = homeworkList.filter(hw => {
+    // Class isolation: match this class or general all-classes announcements
+    if (hw.className && hw.className !== 'All Classes' && hw.className !== selectedClass) {
+      return false;
+    }
     if (selectedSubjectFilter !== 'All' && hw.subject !== selectedSubjectFilter) {
       return false;
     }
@@ -363,26 +372,32 @@ export default function HomeworkSection({
 
             <div className="flex items-center gap-2 overflow-x-auto pb-1 md:pb-0">
               <span className="text-[11px] font-bold text-slate-400 shrink-0">Subject:</span>
-              <select
-                value={selectedSubjectFilter}
-                onChange={(e) => setSelectedSubjectFilter(e.target.value)}
-                className="px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-700"
-              >
-                <option value="All">All Subjects</option>
-                {subjects.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
+              <div className="relative flex items-center">
+                <select
+                  value={selectedSubjectFilter}
+                  onChange={(e) => setSelectedSubjectFilter(e.target.value)}
+                  className="pl-3 pr-8 py-2 text-xs font-semibold rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-700 appearance-none cursor-pointer"
+                >
+                  <option value="All">All Subjects</option>
+                  {subjects.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 pointer-events-none" />
+              </div>
 
-              <select
-                value={deadlineFilter}
-                onChange={(e) => setDeadlineFilter(e.target.value)}
-                className="px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-700"
-              >
-                <option value="all">All Dates</option>
-                <option value="active">Has Deadline</option>
-                <option value="none">No Deadline</option>
-              </select>
+              <div className="relative flex items-center">
+                <select
+                  value={deadlineFilter}
+                  onChange={(e) => setDeadlineFilter(e.target.value)}
+                  className="pl-3 pr-8 py-2 text-xs font-semibold rounded-xl bg-slate-50 border border-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500 text-slate-700 appearance-none cursor-pointer"
+                >
+                  <option value="all">All Dates</option>
+                  <option value="active">Has Deadline</option>
+                  <option value="none">No Deadline</option>
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 pointer-events-none" />
+              </div>
             </div>
           </div>
         </>
@@ -582,15 +597,18 @@ export default function HomeworkSection({
                     <span className="text-[10px] text-slate-400 font-normal">Assigned Subject</span>
                   </div>
                 ) : (
-                  <select
-                    value={subject}
-                    onChange={(e) => setSubject(e.target.value)}
-                    className="w-full mt-1 px-3 py-2.5 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  >
-                    {subjects.map(s => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
+                  <div className="relative mt-1">
+                    <select
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 appearance-none pr-8 cursor-pointer"
+                    >
+                      {subjects.map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-3 pointer-events-none" />
+                  </div>
                 )}
               </div>
 

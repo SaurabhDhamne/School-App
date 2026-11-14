@@ -18,6 +18,7 @@ import {
 
 export default function AttendanceTab({
   students,
+  selectedClass = 'Class 8-A',
   selectedDate,
   onChangeDate,
   attendanceHistory = {},
@@ -109,7 +110,7 @@ export default function AttendanceTab({
           <div className="flex items-center gap-2">
             <h2 className="text-lg sm:text-xl font-black text-slate-900">Daily Attendance Register</h2>
             <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
-              {currentUser?.classTeacherOf || 'Class 8-A'}
+              {selectedClass}
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -350,6 +351,13 @@ export default function AttendanceTab({
               </div>
             );
           })}
+          {filteredStudents.length === 0 && (
+            <div className="py-12 text-center text-slate-400 flex flex-col items-center justify-center gap-2">
+              <Users className="w-8 h-8 text-slate-300" />
+              <p className="font-bold text-slate-700 text-xs">No students enrolled in {selectedClass} yet</p>
+              <p className="text-[11px] text-slate-400">Add students or bulk-upload via Excel in the Admin tab to take attendance.</p>
+            </div>
+          )}
         </div>
 
       </div>

@@ -19,6 +19,7 @@ import HomeworkSection from '@/components/HomeworkSection';
 export default function DashboardTab({
   currentUser,
   students,
+  selectedClass = 'Class 8-A',
   onNavigate,
   onOpenScanModal,
   onOpenEmailAll,
@@ -56,7 +57,7 @@ export default function DashboardTab({
               <span>Good morning, {currentUser?.name || 'Teacher'}!</span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
-              {currentUser?.classTeacherOf || 'Class 8-A'} Academic Overview
+              {selectedClass} Academic Overview
             </h2>
             <p className="text-xs sm:text-sm text-indigo-200/80 max-w-xl">
               Track attendance, review multi-subject unit test grades, and scan paper registers with AI vision.
@@ -89,7 +90,7 @@ export default function DashboardTab({
             </div>
           </div>
           <p className="text-2xl sm:text-3xl font-black text-slate-800">{totalStudents}</p>
-          <span className="text-[11px] font-semibold text-slate-400">Enrolled in Class 8-A</span>
+          <span className="text-[11px] font-semibold text-slate-400">Enrolled in {selectedClass}</span>
         </div>
 
         <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col gap-2">
@@ -208,33 +209,39 @@ export default function DashboardTab({
               <Award className="w-4 h-4 text-amber-500" />
               <span>Top Academic Performers</span>
             </h3>
-            <span className="text-xs font-semibold text-slate-400">Class 8-A</span>
+            <span className="text-xs font-semibold text-slate-400">{selectedClass}</span>
           </div>
 
           <div className="flex flex-col gap-2.5">
-            {topStudents.map((st, idx) => {
-              const pct = calculatePercentage(st.marks);
-              const gr = getGrade(pct);
-              return (
-                <div key={st.rollNo} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                  <div className="flex items-center gap-3">
-                    <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 font-bold text-xs flex items-center justify-center">
-                      #{idx + 1}
-                    </span>
-                    <div>
-                      <p className="text-xs font-bold text-slate-800">{st.name}</p>
-                      <p className="text-[10px] text-slate-400">Roll No: {st.rollNo}</p>
+            {topStudents.length === 0 ? (
+              <div className="py-8 text-center text-slate-400 text-xs">
+                No students enrolled in {selectedClass} yet.
+              </div>
+            ) : (
+              topStudents.map((st, idx) => {
+                const pct = calculatePercentage(st.marks);
+                const gr = getGrade(pct);
+                return (
+                  <div key={st.rollNo} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
+                    <div className="flex items-center gap-3">
+                      <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 font-bold text-xs flex items-center justify-center">
+                        #{idx + 1}
+                      </span>
+                      <div>
+                        <p className="text-xs font-bold text-slate-800">{st.name}</p>
+                        <p className="text-[10px] text-slate-400">Roll No: {st.rollNo}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-bold text-slate-700">{pct}%</span>
+                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${gr.color}`}>
+                        {gr.grade}
+                      </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold text-slate-700">{pct}%</span>
-                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${gr.color}`}>
-                      {gr.grade}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+            )}
           </div>
         </div>
 

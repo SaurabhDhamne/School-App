@@ -17,7 +17,8 @@ import {
   Eye,
   UserCheck,
   ExternalLink,
-  Calendar
+  Calendar,
+  ChevronDown
 } from 'lucide-react';
 
 export default function ScanModal({
@@ -284,15 +285,18 @@ export default function ScanModal({
                 </span>
               </div>
             ) : (
-              <select
-                value={scanSubject}
-                onChange={(e) => setScanSubject(e.target.value)}
-                className="bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 px-2.5 py-1 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full"
-              >
-                {subjects.map(s => (
-                  <option key={s.key} value={s.key}>{s.label}</option>
-                ))}
-              </select>
+              <div className="relative w-full">
+                <select
+                  value={scanSubject}
+                  onChange={(e) => setScanSubject(e.target.value)}
+                  className="bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 pl-3 pr-8 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-full appearance-none cursor-pointer"
+                >
+                  {subjects.map(s => (
+                    <option key={s.key} value={s.key}>{s.label}</option>
+                  ))}
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-2 pointer-events-none" />
+              </div>
             )}
           </div>
         )}
@@ -451,18 +455,21 @@ export default function ScanModal({
                       </span>
                       <div className="flex items-center gap-2">
                         <span className="text-[11px] font-medium text-slate-600 whitespace-nowrap">Assign score to:</span>
-                        <select
-                          value={selectedAssignRoll}
-                          onChange={(e) => setSelectedAssignRoll(e.target.value)}
-                          className="w-full text-xs font-semibold bg-white border border-amber-300 rounded-lg px-2 py-1 text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                        >
-                          <option value="">-- Select Class 8-A Student --</option>
-                          {students.map(s => (
-                            <option key={s.rollNo} value={s.rollNo}>
-                              #{s.rollNo} - {s.name}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="relative w-full">
+                          <select
+                            value={selectedAssignRoll}
+                            onChange={(e) => setSelectedAssignRoll(e.target.value)}
+                            className="w-full text-xs font-semibold bg-white border border-amber-300 rounded-xl pl-2.5 pr-7 py-1 text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500 appearance-none cursor-pointer"
+                          >
+                            <option value="">-- Select Student --</option>
+                            {students.map(s => (
+                              <option key={s.rollNo} value={s.rollNo}>
+                                #{s.rollNo} - {s.name}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown className="w-3.5 h-3.5 text-amber-700 absolute right-2 top-1.5 pointer-events-none" />
+                        </div>
                       </div>
                     </div>
                   )}

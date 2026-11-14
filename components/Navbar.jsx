@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Sparkles, 
   Home as HomeIcon, 
@@ -8,35 +8,176 @@ import {
   FileSpreadsheet, 
   BookOpen,
   LogIn, 
-  ShieldCheck 
+  ShieldCheck,
+  GraduationCap,
+  ChevronDown,
+  Smartphone,
+  Check
 } from 'lucide-react';
 
 export default function Navbar({ 
   activeTab, 
   setActiveTab, 
   currentUser, 
+  selectedClass = 'Class 8-A',
+  onChangeClass,
+  availableClasses = [],
+  schoolConfig,
   onOpenAuthModal, 
   onOpenProfileModal 
 }) {
   const isAdmin = currentUser?.role === 'admin';
+  const isClassTeacher = isAdmin || (currentUser?.classTeacherOf && currentUser.classTeacherOf === selectedClass);
+  const displaySchoolName = schoolConfig?.schoolName || 'MySchool';
+
+  // PWA Install Prompt State
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [isInstallable, setIsInstallable] = useState(false);
+
+  useEffect(() => {
+    // If already installed or launched from mobile home screen (standalone), never show button
+    const isStandalone = 
+      (typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches) ||
+      (typeof window !== 'undefined' && window.navigator?.standalone === true);
+
+    if (isStandalone) {
+      setIsInstallable(false);
+      return;
+    }
+
+    const handleBeforeInstall = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setIsInstallable(true);
+    };
+
+    const handleAppInstalled = () => {
+      setIsInstallable(false);
+      setDeferredPrompt(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setIsInstallable(false);
+    }
+    setDeferredPrompt(null);
+  };
+
+  // Custom Interactive Class Switcher Dropdown State
+  const [isClassMenuOpen, setIsClassMenuOpen] = useState(false);
+  const classDropdownRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (classDropdownRef.current && !classDropdownRef.current.contains(e.target)) {
+        setIsClassMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') setIsClassMenuOpen(false);
+    };
+
+    if (isClassMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isClassMenuOpen]);
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-6 py-3">
-      <div className="max-w-7xl mx-auto flex items-center justify-between">
+    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 px-4 sm:px-6 py-2.5">
+      <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
         
-        {/* Left: Brand Identity */}
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab('home')}>
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#171340] to-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-100">
+        {/* Left: Brand Identity & Active Class Switcher */}
+        <div className="flex items-center gap-3 sm:gap-5 min-w-0">
+          <div className="flex items-center gap-2.5 cursor-pointer shrink-0" onClick={() => setActiveTab('home')}>
+            <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-[#171340] to-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-100">
               <Sparkles className="w-5 h-5 text-[#FF8A00]" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-black tracking-tight text-slate-900">MySchool</h1>
-              </div>
-              <p className="text-[11px] text-slate-400 font-medium">Class 8-A Teacher Portal</p>
+              <h1 className="text-base sm:text-lg font-black tracking-tight text-slate-900 leading-tight">
+                {displaySchoolName}
+              </h1>
+              <p className="text-[10px] text-slate-400 font-semibold hidden sm:block">
+                {schoolConfig?.schoolTagline || 'Teacher & Academic Portal'}
+              </p>
             </div>
           </div>
+
+          {/* Global Interactive Custom Class Switcher Dropdown */}
+          {currentUser && availableClasses.length > 0 && (
+            <div className="relative" ref={classDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setIsClassMenuOpen(prev => !prev)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border text-xs font-black transition-all shadow-xs ${
+                  isClassMenuOpen
+                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200'
+                    : 'bg-indigo-50/90 border-indigo-200/90 text-indigo-950 hover:bg-indigo-100/90'
+                }`}
+                title="Switch Active Class"
+              >
+                <GraduationCap className={`w-4 h-4 ${isClassMenuOpen ? 'text-amber-300' : 'text-indigo-600'} shrink-0`} />
+                <span>{selectedClass}</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isClassMenuOpen ? 'rotate-180 text-white' : 'text-indigo-600'}`} />
+              </button>
+
+              {/* Custom Floating Dropdown Menu */}
+              {isClassMenuOpen && (
+                <div className="absolute left-0 mt-2 w-52 bg-white rounded-2xl border border-slate-200 shadow-2xl shadow-indigo-950/20 py-2 z-50 animate-in fade-in zoom-in-95 duration-150">
+                  <div className="px-3 pb-2 mb-1 border-b border-slate-100 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Switch Class</span>
+                    <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                      {availableClasses.length} Classes
+                    </span>
+                  </div>
+
+                  <div className="max-h-64 overflow-y-auto px-1 space-y-0.5">
+                    {availableClasses.map(c => {
+                      const isSelected = c === selectedClass;
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => {
+                            onChangeClass?.(c);
+                            setIsClassMenuOpen(false);
+                          }}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-left transition-all ${
+                            isSelected
+                              ? 'bg-indigo-50 text-indigo-700 font-black'
+                              : 'text-slate-700 hover:bg-slate-50 hover:text-indigo-600'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className={`w-2 h-2 rounded-full transition-all ${isSelected ? 'bg-indigo-600 scale-125' : 'bg-slate-300'}`} />
+                            <span>{c}</span>
+                          </div>
+                          {isSelected && (
+                            <Check className="w-4 h-4 text-indigo-600 stroke-[3]" />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Desktop Navigation Tabs */}
           <nav className="hidden md:flex items-center gap-1 bg-slate-100/80 p-1 rounded-2xl border border-slate-200/60">
@@ -105,8 +246,19 @@ export default function Navbar({
           </nav>
         </div>
 
-        {/* Right: Teacher / Admin Profile Pill */}
-        <div className="flex items-center gap-2.5">
+        {/* Right: Teacher / Admin Profile Pill & Install App */}
+        <div className="flex items-center gap-2">
+          {isInstallable && (
+            <button
+              onClick={handleInstallClick}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs shadow-sm shadow-emerald-200 transition-all animate-pulse"
+              title="Install app to your home screen"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Install App</span>
+            </button>
+          )}
+
           {currentUser ? (
             <div 
               onClick={onOpenProfileModal}
@@ -124,11 +276,11 @@ export default function Navbar({
               </div>
               <div className="hidden sm:block text-left">
                 <p className="text-xs font-bold text-slate-800 leading-tight">{currentUser.name}</p>
-                <p className={`text-[10px] font-semibold ${isAdmin ? 'text-amber-700 font-bold' : 'text-indigo-600'}`}>
+                <p className={`text-[10px] font-semibold ${isAdmin ? 'text-amber-700 font-bold' : isClassTeacher ? 'text-indigo-600 font-bold' : 'text-slate-500'}`}>
                   {isAdmin ? 'School Administrator' : (
-                    currentUser.role === 'class_teacher' 
-                      ? `${currentUser.classTeacherOf || 'Class 8-A'} Teacher` 
-                      : `${currentUser.subject || 'Subject'} Teacher`
+                    isClassTeacher 
+                      ? `Class Teacher • ${selectedClass}` 
+                      : `${currentUser.subject || 'Subject'} Teacher • ${selectedClass}`
                   )}
                 </p>
               </div>
