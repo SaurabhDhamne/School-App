@@ -24,7 +24,9 @@ import {
   Filter,
   CheckCircle2,
   AlertCircle,
-  ChevronDown
+  ChevronDown,
+  RefreshCw,
+  Upload
 } from 'lucide-react';
 
 const STORAGE_KEY = 'myschool_homework_posts';
@@ -135,6 +137,7 @@ export default function HomeworkSection({
   const [message, setMessage] = useState('');
   const [link, setLink] = useState('');
   const [attachedFile, setAttachedFile] = useState(null); // { type: 'image' | 'pdf', name: '', size: '', url: '' }
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [hasDeadline, setHasDeadline] = useState(false);
   const [deadlineDate, setDeadlineDate] = useState(() => {
     const d = new Date();
@@ -144,27 +147,51 @@ export default function HomeworkSection({
 
   const subjects = ['Mathematics', 'Science', 'English', 'Social Studies', 'Hindi', 'General Notice'];
 
-  // Load from persistent localStorage on mount
-  useEffect(() => {
+  // Load from persistent backend API + localStorage fallback
+  const fetchHomework = async () => {
+    // 1. Instant cache load from localStorage
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed)) {
           setHomeworkList(parsed);
-          return;
         }
       }
-      setHomeworkList(INITIAL_DEFAULT_POSTS);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_DEFAULT_POSTS));
-    } catch (e) {
-      console.warn('LocalStorage read error:', e);
-      setHomeworkList([]);
-    }
-  }, []);
+    } catch (e) {}
 
-  // Save to localStorage
-  const savePosts = (newList) => {
+    // 2. Fresh live sync from server API
+    try {
+      const cls = selectedClass || 'Class 8-A';
+      const res = await fetch(`/api/homework?className=${encodeURIComponent(cls)}`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setHomeworkList(json.data);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(json.data));
+        } catch (e) {}
+      }
+    } catch (err) {
+      console.warn('Homework API fetch error:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchHomework();
+
+    // Auto-sync when returning to tab or every 10 seconds
+    const handleFocus = () => fetchHomework();
+    window.addEventListener('focus', handleFocus);
+    const interval = setInterval(fetchHomework, 10000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(interval);
+    };
+  }, [selectedClass]);
+
+  // Save to both state and backend API
+  const savePosts = async (newList) => {
     setHomeworkList(newList);
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(newList));
@@ -173,31 +200,58 @@ export default function HomeworkSection({
     }
   };
 
-  const handleFileUpload = (e) => {
+  const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     
-    // Check file size (limit to 6MB for smooth browser storage)
-    if (file.size > 6 * 1024 * 1024) {
-      showToast?.('⚠️ Please choose a file smaller than 6MB');
+    // Check file size (limit to 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      showToast?.('⚠️ Please choose a file smaller than 10MB');
       return;
     }
 
+    setIsUploadingFile(true);
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    const reader = new FileReader();
 
-    reader.onload = (evt) => {
-      setAttachedFile({
-        type: isPdf ? 'pdf' : 'image',
-        name: file.name,
-        size: formatFileSize(file.size),
-        url: evt.target.result
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/homework/upload', {
+        method: 'POST',
+        body: formData
       });
-    };
-    reader.readAsDataURL(file);
+      const data = await res.json();
+
+      if (data.success && data.url) {
+        setAttachedFile({
+          type: data.type || (isPdf ? 'pdf' : 'image'),
+          name: data.name || file.name,
+          size: data.size || formatFileSize(file.size),
+          url: data.url
+        });
+        showToast?.('☁️ Worksheet uploaded to Supabase Storage Bucket!');
+      } else {
+        throw new Error(data.error || 'Upload failed');
+      }
+    } catch (err) {
+      console.warn('Bucket upload error, falling back to local file reader:', err);
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        setAttachedFile({
+          type: isPdf ? 'pdf' : 'image',
+          name: file.name,
+          size: formatFileSize(file.size),
+          url: evt.target.result
+        });
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsUploadingFile(false);
+    }
   };
 
-  const handleCreateHomework = (e) => {
+  const handleCreateHomework = async (e) => {
     e.preventDefault();
     if (!message.trim()) {
       showToast?.('⚠️ Please write a homework message or instructions');
@@ -223,19 +277,32 @@ export default function HomeworkSection({
       deadlineDate: hasDeadline ? deadlineDate : null
     };
 
+    // Optimistic update
     const updated = [newPost, ...homeworkList];
     savePosts(updated);
     showToast?.('📢 Homework & notice posted successfully!');
     
-    // Reset form
+    // Reset form & close modal immediately
     setMessage('');
     setLink('');
     setAttachedFile(null);
     setHasDeadline(false);
     setIsModalOpen(false);
+
+    // Sync to backend database so phone and all parents receive it
+    try {
+      await fetch('/api/homework', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create', post: newPost })
+      });
+      fetchHomework();
+    } catch (err) {
+      console.warn('Backend homework sync error:', err);
+    }
   };
 
-  const handleDelete = (id, postTeacherName) => {
+  const handleDelete = async (id, postTeacherName) => {
     const isAdmin = currentUser?.role === 'admin';
     const isOwner = currentUser?.name === postTeacherName;
     const isClassTeacher = currentUser?.role === 'class_teacher';
@@ -249,6 +316,16 @@ export default function HomeworkSection({
       const filtered = homeworkList.filter(hw => hw.id !== id);
       savePosts(filtered);
       showToast?.('🗑️ Homework post removed');
+
+      try {
+        await fetch('/api/homework', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'delete', id })
+        });
+      } catch (err) {
+        console.warn('Backend homework delete error:', err);
+      }
     }
   };
 
@@ -325,36 +402,26 @@ export default function HomeworkSection({
       {/* Full Page Stats & Search Controls */}
       {isFullPage && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-100 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-indigo-600">Total Posted</p>
-                <p className="text-xl font-black text-indigo-950 mt-0.5">{totalPosts}</p>
-              </div>
-              <div className="w-9 h-9 rounded-xl bg-white text-indigo-600 flex items-center justify-center shadow-xs">
-                <BookOpen className="w-4 h-4" />
-              </div>
+          {/* Compact Homework Summary Bar (Clean & Space-Saving) */}
+          <div className="flex flex-wrap items-center justify-between gap-2.5 bg-white p-3 sm:px-4 sm:py-2.5 rounded-2xl border border-slate-200/90 shadow-2xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-indigo-50 border border-indigo-100/90 text-indigo-900 text-xs font-bold">
+                <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                <span>{totalPosts} Total Posted</span>
+              </span>
+              <span className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-amber-50 border border-amber-100/90 text-amber-900 text-xs font-bold">
+                <Calendar className="w-3.5 h-3.5 text-amber-600" />
+                <span>{activeDeadlines} With Deadlines</span>
+              </span>
+              <span className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-rose-50 border border-rose-100/90 text-rose-900 text-xs font-bold">
+                <FileText className="w-3.5 h-3.5 text-rose-600" />
+                <span>{withAttachments} PDFs & Photos</span>
+              </span>
             </div>
 
-            <div className="p-4 rounded-2xl bg-amber-50/60 border border-amber-100 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-amber-700">With Deadlines</p>
-                <p className="text-xl font-black text-amber-950 mt-0.5">{activeDeadlines}</p>
-              </div>
-              <div className="w-9 h-9 rounded-xl bg-white text-amber-600 flex items-center justify-center shadow-xs">
-                <Calendar className="w-4 h-4" />
-              </div>
-            </div>
-
-            <div className="p-4 rounded-2xl bg-rose-50/60 border border-rose-100 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold text-rose-700">PDFs & Photos</p>
-                <p className="text-xl font-black text-rose-950 mt-0.5">{withAttachments}</p>
-              </div>
-              <div className="w-9 h-9 rounded-xl bg-white text-rose-600 flex items-center justify-center shadow-xs">
-                <FileText className="w-4 h-4" />
-              </div>
-            </div>
+            <span className="text-[11px] font-semibold text-slate-400 hidden sm:inline">
+              Cloud Storage Synced &bull; {selectedClass}
+            </span>
           </div>
 
           {/* Search and Filters */}
@@ -670,10 +737,15 @@ export default function HomeworkSection({
                       <X className="w-4 h-4" />
                     </button>
                   </div>
+                ) : isUploadingFile ? (
+                  <div className="flex items-center justify-center gap-2.5 p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/70 text-indigo-700">
+                    <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
+                    <span className="text-xs font-bold">Uploading attachment to Supabase Bucket...</span>
+                  </div>
                 ) : (
                   <label className="flex items-center justify-center gap-2 p-3.5 rounded-xl border border-dashed border-slate-300 hover:border-indigo-400 bg-slate-50/60 cursor-pointer text-slate-600 transition-colors">
-                    <FileText className="w-4 h-4 text-slate-400" />
-                    <span className="text-xs font-semibold">Click to upload Worksheet Photo or PDF</span>
+                    <Upload className="w-4 h-4 text-indigo-600" />
+                    <span className="text-xs font-semibold">Click to upload Worksheet Photo or PDF (Cloud Storage)</span>
                     <input 
                       type="file" 
                       accept="image/*,application/pdf" 

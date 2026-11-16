@@ -26,14 +26,40 @@ import {
   Filter,
   CheckSquare,
   Square,
-  ChevronDown
+  ChevronDown,
+  Palmtree,
+  Coffee,
+  CalendarCheck,
+  CalendarPlus,
+  Calendar
 } from 'lucide-react';
 import { getSchoolConfig } from '@/lib/schoolConfig';
+import { DEFAULT_GAZETTED_HOLIDAYS, getLocalCustomHolidays, saveLocalCustomHolidays } from '@/lib/holidays';
 
-export default function AdminTab({ students, onRefreshStudents, showToast }) {
-  const [activeAdminSubTab, setActiveAdminSubTab] = useState('teachers'); // 'teachers' | 'students'
+export default function AdminTab({ 
+  students, 
+  onRefreshStudents, 
+  showToast,
+  customHolidays = [],
+  onRefreshHolidays
+}) {
+  const [activeAdminSubTab, setActiveAdminSubTab] = useState('teachers'); // 'teachers' | 'students' | 'holidays'
   const [selectedClassFilter, setSelectedClassFilter] = useState('all'); // 'all' | 'Class 8-A' | etc.
   const studentFileInputRef = useRef(null);
+
+  // Holidays state
+  const [localHolidays, setLocalHolidays] = useState(() => customHolidays.length > 0 ? customHolidays : getLocalCustomHolidays());
+  const [isHolidayModalOpen, setIsHolidayModalOpen] = useState(false);
+  const [holidayDate, setHolidayDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [holidayName, setHolidayName] = useState('');
+  const [isSavingHoliday, setIsSavingHoliday] = useState(false);
+  const [holidayToDelete, setHolidayToDelete] = useState(null);
+
+  useEffect(() => {
+    if (customHolidays && customHolidays.length > 0) {
+      setLocalHolidays(customHolidays);
+    }
+  }, [customHolidays]);
 
   // Available classes in School from centralized config
   const schoolConfig = getSchoolConfig();
@@ -127,6 +153,13 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
         body: JSON.stringify({ action: 'admin_clear_all_teachers' })
       });
 
+      // 2.5 Clear all homework posts from server & database
+      await fetch('/api/homework', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clear_all' })
+      });
+
       // 3. Clear local storage caches
       try {
         localStorage.removeItem('myschool_students_cache');
@@ -165,6 +198,13 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'admin_load_demo_teachers' })
+      });
+
+      // 2.5 Restore demo homework on server
+      await fetch('/api/homework', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'restore_demo' })
       });
 
       // 3. Clear local storage caches so fresh demo syncs
@@ -449,6 +489,72 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
     }
   };
 
+  // ---------------- Holiday Actions ----------------
+  const handleOpenAddHoliday = () => {
+    setHolidayDate(new Date().toISOString().split('T')[0]);
+    setHolidayName('');
+    setIsHolidayModalOpen(true);
+  };
+
+  const handleSaveHoliday = async (e) => {
+    e.preventDefault();
+    if (!holidayDate || !holidayName.trim()) {
+      showToast('⚠️ Please enter both holiday date and name.');
+      return;
+    }
+    setIsSavingHoliday(true);
+    try {
+      const res = await fetch('/api/holidays', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create',
+          holiday: {
+            date: holidayDate,
+            name: holidayName.trim(),
+            declaredBy: 'Administrator'
+          }
+        })
+      });
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setLocalHolidays(json.data);
+        saveLocalCustomHolidays(json.data);
+        onRefreshHolidays?.(json.data);
+      }
+      showToast(`🌴 Declared holiday: "${holidayName.trim()}" for ${holidayDate}`);
+      setIsHolidayModalOpen(false);
+    } catch (e) {
+      showToast('⚠️ Failed to save holiday');
+    } finally {
+      setIsSavingHoliday(false);
+    }
+  };
+
+  const confirmDeleteHoliday = async () => {
+    if (!holidayToDelete) return;
+    try {
+      const res = await fetch('/api/holidays', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete',
+          id: holidayToDelete.id
+        })
+      });
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setLocalHolidays(json.data);
+        saveLocalCustomHolidays(json.data);
+        onRefreshHolidays?.(json.data);
+      }
+      showToast(`Removed holiday: ${holidayToDelete.name}`);
+      setHolidayToDelete(null);
+    } catch (e) {
+      showToast('⚠️ Failed to delete holiday');
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto px-4 sm:px-6 py-6">
       
@@ -472,10 +578,10 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
         </div>
 
         {/* Sub-tab Pill Toggles */}
-        <div className="flex items-center gap-2 bg-black/20 p-1 rounded-2xl border border-white/10 self-start sm:self-auto">
+        <div className="flex items-center gap-1.5 sm:gap-2 bg-black/20 p-1 rounded-2xl border border-white/10 self-start sm:self-auto overflow-x-auto">
           <button
             onClick={() => setActiveAdminSubTab('teachers')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
               activeAdminSubTab === 'teachers'
                 ? 'bg-white text-slate-900 shadow-sm'
                 : 'text-amber-100 hover:text-white'
@@ -486,7 +592,7 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
           </button>
           <button
             onClick={() => setActiveAdminSubTab('students')}
-            className={`flex items-center gap-2 px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
               activeAdminSubTab === 'students'
                 ? 'bg-white text-slate-900 shadow-sm'
                 : 'text-amber-100 hover:text-white'
@@ -494,6 +600,17 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
           >
             <GraduationCap className="w-4 h-4" />
             <span>Students ({students.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveAdminSubTab('holidays')}
+            className={`flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeAdminSubTab === 'holidays'
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-amber-100 hover:text-white'
+            }`}
+          >
+            <Palmtree className="w-4 h-4" />
+            <span>Holidays ({localHolidays.length})</span>
           </button>
         </div>
       </div>
@@ -791,6 +908,184 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
                 <p className="text-[11px] text-slate-400 mt-1">Click &ldquo;Add Student&rdquo; or use &ldquo;Bulk Upload&rdquo; with the template to enroll students.</p>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* 3. SCHOOL HOLIDAY & OFF-DAYS MANAGEMENT SECTION           */}
+      {/* ========================================================= */}
+      {activeAdminSubTab === 'holidays' && (
+        <div className="flex flex-col gap-5">
+          {/* Main Holiday Management Card */}
+          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden flex flex-col">
+            {/* Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-800">School Calendar & Holiday Policy</h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                    Auto-Enforced
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Holidays are automatically grayed out & blurred in teachers&apos; attendance registers and excluded from student absence calculations.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleOpenAddHoliday}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-md shadow-amber-200 transition-all self-start sm:self-auto"
+                >
+                  <CalendarPlus className="w-4 h-4" />
+                  <span>Declare Holiday</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Automated Standing Rules Strip */}
+            <div className="p-4 sm:p-5 bg-gradient-to-br from-amber-50/50 via-slate-50 to-indigo-50/30 border-b border-slate-100">
+              <div className="flex items-center gap-2 mb-3">
+                <Sparkles className="w-4 h-4 text-amber-600" />
+                <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                  Automated Standing Weekly & National Rules
+                </h4>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {/* Sunday Rule */}
+                <div className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 mt-0.5">
+                    <Palmtree className="w-5 h-5 text-amber-600" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs font-bold text-slate-800">Every Sunday</p>
+                      <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
+                        Active
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                      Universal weekly off. Attendance is automatically grayed out and disabled.
+                    </p>
+                  </div>
+                </div>
+
+                {/* 2nd & 4th Saturday Rule */}
+                <div className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-orange-100 text-orange-700 flex items-center justify-center shrink-0 mt-0.5">
+                    <Coffee className="w-5 h-5 text-orange-600" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs font-bold text-slate-800">2nd & 4th Saturday</p>
+                      <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
+                        Active
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                      Standard bi-weekly school holiday (days 8-14 & 22-28 of every month).
+                    </p>
+                  </div>
+                </div>
+
+                {/* National Gazetted Holidays */}
+                <div className="p-3.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center shrink-0 mt-0.5">
+                    <CalendarCheck className="w-5 h-5 text-indigo-600" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs font-bold text-slate-800">Gazetted Holidays</p>
+                      <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-800">
+                        Built-in
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">
+                      Republic Day, Independence Day, Gandhi Jayanti, Diwali, Christmas, etc.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Declared Custom School Holidays List */}
+            <div className="p-4 sm:p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                  Admin-Declared School Holidays ({localHolidays.length})
+                </h4>
+                <span className="text-[11px] text-slate-400">
+                  Custom events, weather breaks, sports days
+                </span>
+              </div>
+
+              {localHolidays.length === 0 ? (
+                <div className="py-10 text-center text-slate-400 flex flex-col items-center justify-center gap-2 border border-dashed border-slate-200 rounded-2xl">
+                  <Palmtree className="w-8 h-8 text-slate-300" />
+                  <p className="font-bold text-slate-700 text-xs">No custom holidays declared yet</p>
+                  <p className="text-[11px] text-slate-400">
+                    Sundays and 2nd/4th Saturdays are already active. Click &ldquo;Declare Holiday&rdquo; to add school-specific holidays.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {localHolidays.map((h) => {
+                    const dateObj = new Date(h.date + 'T00:00:00');
+                    const formattedDate = !isNaN(dateObj.getTime())
+                      ? dateObj.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })
+                      : h.date;
+
+                    return (
+                      <div 
+                        key={h.id || h.date}
+                        className="p-3.5 rounded-2xl border border-amber-200/80 bg-amber-50/40 hover:bg-amber-50/70 transition-all flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold text-xs shrink-0">
+                            <Palmtree className="w-5 h-5 text-amber-600" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-900 truncate">{h.name}</p>
+                            <p className="text-[11px] font-semibold text-amber-700 mt-0.5">{formattedDate}</p>
+                            <p className="text-[10px] text-slate-400 mt-0.2">Declared by {h.declaredBy || 'Admin'}</p>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => setHolidayToDelete(h)}
+                          className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-colors shrink-0"
+                          title="Remove Holiday"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Reference: Standard Gazetted Calendar */}
+            <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50/50">
+              <div className="flex items-center justify-between mb-2.5">
+                <span className="text-xs font-bold text-slate-600">Standard National & Gazetted Days Reference:</span>
+                <span className="text-[11px] font-semibold text-slate-400">Standard School Calendar</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {DEFAULT_GAZETTED_HOLIDAYS.slice(0, 8).map((gh, idx) => (
+                  <span 
+                    key={idx}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white border border-slate-200/80 text-[11px] font-medium text-slate-700 shadow-xs"
+                  >
+                    <span className="text-amber-500 font-bold">&bull;</span>
+                    <span>{gh.name}</span>
+                    <span className="text-slate-400 text-[10px]">({gh.date || gh.dateMatch?.replace('-', '')})</span>
+                  </span>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1200,6 +1495,111 @@ export default function AdminTab({ students, onRefreshStudents, showToast }) {
                 ) : (
                   <span>Restore Demo</span>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: DECLARE CUSTOM HOLIDAY                             */}
+      {/* ========================================================= */}
+      {isHolidayModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-100 flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <Palmtree className="w-4 h-4" />
+                </div>
+                <h3 className="text-base font-bold text-slate-800">Declare School Holiday</h3>
+              </div>
+              <button 
+                onClick={() => setIsHolidayModalOpen(false)}
+                className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveHoliday} className="flex flex-col gap-3.5">
+              <div>
+                <label className="text-xs font-semibold text-slate-600">Holiday Date</label>
+                <input 
+                  type="date" 
+                  required
+                  value={holidayDate} 
+                  onChange={(e) => setHolidayDate(e.target.value)}
+                  className="w-full text-xs px-3 py-2.5 rounded-xl border border-slate-200 mt-1 focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium bg-slate-50 cursor-pointer"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-600">Holiday Name / Occasion</label>
+                <input 
+                  type="text" 
+                  required
+                  placeholder="e.g. Annual Sports Meet (School Closed)"
+                  value={holidayName} 
+                  onChange={(e) => setHolidayName(e.target.value)}
+                  className="w-full text-xs px-3 py-2.5 rounded-xl border border-slate-200 mt-1 focus:outline-none focus:ring-1 focus:ring-amber-500 font-medium"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  This date will automatically be grayed out and non-clickable in teacher attendance registers across all classes.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsHolidayModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingHoliday}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-md shadow-amber-200"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isSavingHoliday ? 'Saving...' : 'Declare Holiday'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: CONFIRM DELETE HOLIDAY                             */}
+      {/* ========================================================= */}
+      {holidayToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-slate-100 flex flex-col gap-4 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 mx-auto flex items-center justify-center">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="text-base font-bold text-slate-900">Remove School Holiday?</h4>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Remove <strong>{holidayToDelete.name}</strong> on <strong>{holidayToDelete.date}</strong>? Teachers will be able to take attendance on this day again.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setHolidayToDelete(null)}
+                className="py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Keep Holiday
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteHoliday}
+                className="py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-200"
+              >
+                Remove
               </button>
             </div>
           </div>

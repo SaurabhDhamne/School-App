@@ -20,8 +20,10 @@ import {
   ZoomOut,
   AlertCircle,
   KeyRound,
-  Smartphone
+  Smartphone,
+  Palmtree
 } from 'lucide-react';
+import { getHolidayInfo } from '@/lib/holidays';
 
 const HW_STORAGE_KEY = 'myschool_homework_posts';
 
@@ -30,10 +32,12 @@ export default function ParentPortalView({
   student,
   attendanceHistory = {},
   students = [],
+  onRefreshStudents,
   onLogout,
   onOpenProfileModal,
   showToast,
-  schoolConfig
+  schoolConfig,
+  customHolidays = []
 }) {
   // Navigation: Homework FIRST, Attendance SECOND
   const [activeTab, setActiveTab] = useState('homework');
@@ -152,19 +156,46 @@ export default function ParentPortalView({
     }
   }, [selectedPdf, selectedImage]);
 
-  // Load Homework Posts from storage
-  useEffect(() => {
+  // Load Homework Posts from live server API + cached localStorage fallback
+  const fetchLiveHomework = async () => {
+    // 1. Instant local storage cache
     try {
       const saved = localStorage.getItem(HW_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
           setHomeworkList(parsed);
-          return;
         }
       }
     } catch (e) {}
-  }, []);
+
+    // 2. Fetch live from server so phone immediately receives PC posts
+    try {
+      const res = await fetch(`/api/homework?className=${encodeURIComponent(studentClass)}`);
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setHomeworkList(json.data);
+        try {
+          localStorage.setItem(HW_STORAGE_KEY, JSON.stringify(json.data));
+        } catch (e) {}
+      }
+    } catch (err) {
+      console.warn('Parent portal homework fetch error:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchLiveHomework();
+
+    const handleFocus = () => fetchLiveHomework();
+    window.addEventListener('focus', handleFocus);
+    const interval = setInterval(fetchLiveHomework, 10000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(interval);
+    };
+  }, [studentClass]);
 
   // Load Parent's local completion checklist for their child
   useEffect(() => {
@@ -202,6 +233,7 @@ export default function ParentPortalView({
     return 'P'; // Default standard presence
   };
 
+  const selectedDateHoliday = getHolidayInfo(selectedDate, customHolidays);
   const selectedDateStatus = getChildStatusForDate(selectedDate);
 
   // Compute overall percentage & chronological history
@@ -209,42 +241,53 @@ export default function ParentPortalView({
     const dates = new Set(Object.keys(attendanceHistory));
     dates.add(todayStr);
 
-    let totalDays = 0;
+    let totalWorkingDays = 0;
     let presentDays = 0;
     let absentDays = 0;
+    let holidayDays = 0;
     const historyRows = [];
 
     dates.forEach(d => {
-      totalDays++;
+      const hInfo = getHolidayInfo(d, customHolidays);
+      const isHol = hInfo.isHoliday;
       const st = getChildStatusForDate(d);
-      if (st === 'P') presentDays++;
-      else absentDays++;
+
+      if (isHol) {
+        holidayDays++;
+      } else {
+        totalWorkingDays++;
+        if (st === 'P') presentDays++;
+        else absentDays++;
+      }
 
       historyRows.push({
         dateStr: d,
-        status: st,
+        status: isHol ? 'H' : st,
+        isHoliday: isHol,
+        holidayReason: hInfo.reason,
         dateObj: new Date(d + 'T00:00:00')
       });
     });
 
     historyRows.sort((a, b) => b.dateObj - a.dateObj);
-    const rate = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 100;
+    const rate = totalWorkingDays > 0 ? Math.round((presentDays / totalWorkingDays) * 100) : 100;
 
     return {
-      totalDays,
+      totalDays: totalWorkingDays,
       presentDays,
       absentDays,
+      holidayDays,
       rate,
       historyRows
     };
-  }, [attendanceHistory, todayStr, currentStudent]);
+  }, [attendanceHistory, todayStr, currentStudent, customHolidays]);
 
   const filteredHistory = useMemo(() => {
     if (historyFilter === 'present') {
       return attendanceStats.historyRows.filter(r => r.status === 'P');
     }
     if (historyFilter === 'absent') {
-      return attendanceStats.historyRows.filter(r => r.status === 'A');
+      return attendanceStats.historyRows.filter(r => r.status === 'A' && !r.isHoliday);
     }
     return attendanceStats.historyRows;
   }, [attendanceStats, historyFilter]);
@@ -366,7 +409,10 @@ export default function ParentPortalView({
           </button>
 
           <button
-            onClick={() => setActiveTab('attendance')}
+            onClick={() => {
+              setActiveTab('attendance');
+              onRefreshStudents?.();
+            }}
             className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
               activeTab === 'attendance'
                 ? 'bg-white text-indigo-900 shadow-md shadow-slate-200'
@@ -653,9 +699,13 @@ export default function ParentPortalView({
                     className="text-xs font-bold px-2.5 py-1.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer"
                   />
                   <span className={`px-2.5 py-1 rounded-xl text-xs font-black ${
-                    selectedDateStatus === 'P' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                    selectedDateHoliday.isHoliday
+                      ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                      : selectedDateStatus === 'P' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
                   }`}>
-                    {selectedDateStatus === 'P' ? 'Present' : 'Absent'}
+                    {selectedDateHoliday.isHoliday 
+                      ? `🌴 ${selectedDateHoliday.reason || 'School Holiday'}`
+                      : selectedDateStatus === 'P' ? 'Present' : 'Absent'}
                   </span>
                 </div>
 
@@ -667,7 +717,7 @@ export default function ParentPortalView({
                       historyFilter === 'all' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500 hover:text-slate-700'
                     }`}
                   >
-                    All ({attendanceStats.totalDays})
+                    Working Days ({attendanceStats.totalDays})
                   </button>
                   <button
                     onClick={() => setHistoryFilter('present')}
@@ -697,14 +747,18 @@ export default function ParentPortalView({
                     className={`p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 cursor-pointer ${
                       selectedDate === row.dateStr 
                         ? 'border-emerald-500 bg-emerald-50/40 shadow-xs' 
-                        : 'border-slate-100 bg-slate-50/60 hover:bg-slate-100/60'
+                        : row.isHoliday
+                          ? 'border-amber-200/70 bg-amber-50/30 hover:bg-amber-50/60'
+                          : 'border-slate-100 bg-slate-50/60 hover:bg-slate-100/60'
                     }`}
                   >
                     <div className="flex items-center gap-3">
                       <div className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${
-                        row.status === 'P' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                        row.isHoliday
+                          ? 'bg-amber-100 text-amber-800'
+                          : row.status === 'P' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
                       }`}>
-                        {row.status === 'P' ? 'P' : 'A'}
+                        {row.isHoliday ? '🌴' : row.status === 'P' ? 'P' : 'A'}
                       </div>
                       <p className="text-xs font-bold text-slate-800">
                         {row.dateObj.toLocaleDateString('en-GB', {
@@ -718,13 +772,20 @@ export default function ParentPortalView({
                             Today
                           </span>
                         )}
+                        {row.isHoliday && (
+                          <span className="ml-2 text-[10px] font-bold text-amber-700">
+                            ({row.holidayReason})
+                          </span>
+                        )}
                       </p>
                     </div>
 
                     <span className={`px-2.5 py-0.5 rounded-lg text-xs font-black ${
-                      row.status === 'P' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                      row.isHoliday
+                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                        : row.status === 'P' ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
                     }`}>
-                      {row.status === 'P' ? 'PRESENT' : 'ABSENT'}
+                      {row.isHoliday ? 'HOLIDAY' : row.status === 'P' ? 'PRESENT' : 'ABSENT'}
                     </span>
                   </div>
                 ))}

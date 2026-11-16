@@ -17,6 +17,7 @@ import ProfileModal from '@/components/ProfileModal';
 import HomeworkSection from '@/components/HomeworkSection';
 import ParentPortalView from '@/components/ParentPortalView';
 import { getSchoolConfig } from '@/lib/schoolConfig';
+import { getLocalCustomHolidays, saveLocalCustomHolidays, isSchoolHoliday } from '@/lib/holidays';
 
 export default function App() {
   // Navigation: 'home' | 'attendance' | 'marksheet' | 'admin'
@@ -24,6 +25,7 @@ export default function App() {
 
   // School Configuration & Multi-Class Architecture
   const [schoolConfig, setSchoolConfig] = useState(() => getSchoolConfig());
+  const [customHolidays, setCustomHolidays] = useState(() => getLocalCustomHolidays());
   const [selectedClass, setSelectedClass] = useState(() => {
     try {
       const savedUser = localStorage.getItem('edusnap_user');
@@ -131,7 +133,7 @@ export default function App() {
     return null;
   };
 
-  // Initial load
+  // Initial load & live cross-device sync
   useEffect(() => {
     const savedUser = localStorage.getItem('edusnap_user');
     if (savedUser) {
@@ -145,7 +147,37 @@ export default function App() {
     }
 
     fetchStudents();
+    fetchHolidays();
+
+    // Auto-sync attendance, marks & holidays live across devices on window focus & every 10s
+    const handleFocus = () => {
+      fetchStudents();
+      fetchHolidays();
+    };
+    window.addEventListener('focus', handleFocus);
+    const interval = setInterval(() => {
+      fetchStudents();
+      fetchHolidays();
+    }, 10000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      clearInterval(interval);
+    };
   }, []);
+
+  const fetchHolidays = async () => {
+    try {
+      const res = await fetch('/api/holidays');
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setCustomHolidays(json.data);
+        saveLocalCustomHolidays(json.data);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch holidays:', err);
+    }
+  };
 
   // Universal Mobile Back Button: Intercept Android/browser back button to dismiss open modal instead of closing app
   useEffect(() => {
@@ -201,7 +233,10 @@ export default function App() {
       }
       if (json.attendanceHistory && Object.keys(json.attendanceHistory).length > 0) {
         setAttendanceHistory(prev => {
-          const merged = { ...json.attendanceHistory, ...prev };
+          const merged = { ...prev };
+          for (const [dateKey, dayRolls] of Object.entries(json.attendanceHistory)) {
+            merged[dateKey] = { ...(merged[dateKey] || {}), ...dayRolls };
+          }
           try {
             localStorage.setItem('myschool_attendance_history', JSON.stringify(merged));
           } catch (e) {}
@@ -261,6 +296,13 @@ export default function App() {
   // Attendance Toggle (strictly isolated per date, persists to storage & DB)
   const toggleAttendance = async (rollNo, dateStr) => {
     const targetDate = dateStr || selectedAttendanceDate || new Date().toISOString().split('T')[0];
+
+    // Cannot take attendance on school holidays / off days
+    if (isSchoolHoliday(targetDate, customHolidays)) {
+      showToast('🌴 That day is a school holiday. Attendance is disabled.');
+      return;
+    }
+
     const todayStr = new Date().toISOString().split('T')[0];
 
     // Determine current status strictly for targetDate without cross-date leakage
@@ -676,10 +718,12 @@ export default function App() {
           student={currentUser.student}
           attendanceHistory={attendanceHistory}
           students={students}
+          onRefreshStudents={fetchStudents}
           onLogout={handleLogout}
           onOpenProfileModal={() => setIsProfileModalOpen(true)}
           showToast={showToast}
           schoolConfig={schoolConfig}
+          customHolidays={customHolidays}
         />
         <ProfileModal 
           isOpen={isProfileModalOpen}
@@ -750,6 +794,7 @@ export default function App() {
             onOpenEmailSingle={handleOpenEmailSingle}
             onOpenEmailAll={handleOpenEmailAll}
             currentUser={effectiveUser}
+            customHolidays={customHolidays}
           />
         )}
 
@@ -790,6 +835,8 @@ export default function App() {
             students={students}
             onRefreshStudents={fetchStudents}
             showToast={showToast}
+            customHolidays={customHolidays}
+            onRefreshHolidays={(hols) => setCustomHolidays(hols)}
           />
         )}
       </main>

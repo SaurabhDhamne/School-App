@@ -10,11 +10,15 @@ import {
   Camera, 
   Mail, 
   Search, 
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  Sparkles
+  ChevronLeft, 
+  ChevronRight, 
+  Clock, 
+  Sparkles,
+  Palmtree,
+  Coffee,
+  Users
 } from 'lucide-react';
+import { getHolidayInfo } from '@/lib/holidays';
 
 export default function AttendanceTab({
   students,
@@ -27,12 +31,17 @@ export default function AttendanceTab({
   onOpenExportModal,
   onOpenEmailSingle,
   onOpenEmailAll,
-  currentUser
+  currentUser,
+  customHolidays = []
 }) {
   const [searchQuery, setSearchQuery] = useState('');
 
   const todayStr = new Date().toISOString().split('T')[0];
   const activeDate = selectedDate || todayStr;
+
+  // Determine holiday status for active date
+  const holidayInfo = getHolidayInfo(activeDate, customHolidays);
+  const isHoliday = holidayInfo.isHoliday;
 
   // Generate 7-day week strip centered around the selected date
   const getDaysOfWeek = (baseDateStr) => {
@@ -141,13 +150,23 @@ export default function AttendanceTab({
           </button>
 
           {/* Alert Absent Parents for Selected Date */}
-          <button
-            onClick={() => onOpenEmailAll('attendance', activeDate)}
-            className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 rounded-2xl bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold text-xs border border-rose-200/70 transition-all"
-          >
-            <Mail className="w-3.5 h-3.5 text-rose-600" />
-            <span>Alert Absentees ({absentCount})</span>
-          </button>
+          {isHoliday ? (
+            <div 
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-2xl bg-slate-100 text-slate-400 font-bold text-xs border border-slate-200/80 cursor-not-allowed select-none"
+              title={`${holidayInfo.reason || 'School Holiday'} - No absentee alerts`}
+            >
+              <Palmtree className="w-3.5 h-3.5 text-amber-500" />
+              <span>Holiday (No Alerts)</span>
+            </div>
+          ) : (
+            <button
+              onClick={() => onOpenEmailAll('attendance', activeDate)}
+              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 rounded-2xl bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold text-xs border border-rose-200/70 transition-all"
+            >
+              <Mail className="w-3.5 h-3.5 text-rose-600" />
+              <span>Alert Absentees ({absentCount})</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -216,21 +235,31 @@ export default function AttendanceTab({
           <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
             {weekDays.map((d) => {
               const isSelected = activeDate === d.dateStr;
+              const dayHoliday = getHolidayInfo(d.dateStr, customHolidays);
+
               return (
                 <button
                   key={d.key}
                   onClick={() => onChangeDate?.(d.dateStr)}
+                  title={dayHoliday.isHoliday ? `${d.dateStr} - ${dayHoliday.reason}` : d.dateStr}
                   className={`flex flex-col items-center justify-center py-2 px-1 sm:p-2.5 rounded-2xl transition-all relative ${
                     isSelected
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 font-bold'
                       : d.isToday
                         ? 'bg-indigo-50/70 border border-indigo-200 text-indigo-800 font-semibold hover:bg-indigo-100/70'
-                        : 'bg-slate-50 text-slate-600 hover:bg-slate-100 font-medium'
+                        : dayHoliday.isHoliday
+                          ? 'bg-amber-50/70 text-amber-900 border border-amber-200/60 hover:bg-amber-100/60 font-medium'
+                          : 'bg-slate-50 text-slate-600 hover:bg-slate-100 font-medium'
                   }`}
                 >
                   <span className="text-[10px] sm:text-[11px] opacity-80">{d.label}</span>
                   <span className="text-sm sm:text-base font-black mt-0.5">{d.dayNum}</span>
-                  {d.isToday && !isSelected && (
+                  {dayHoliday.isHoliday && (
+                    <span className="text-[9px] leading-none mt-0.5 opacity-90">
+                      🌴
+                    </span>
+                  )}
+                  {d.isToday && !isSelected && !dayHoliday.isHoliday && (
                     <span className="w-1.5 h-1.5 rounded-full bg-indigo-600 absolute bottom-1" />
                   )}
                 </button>
@@ -247,20 +276,36 @@ export default function AttendanceTab({
             <span className="text-[11px] font-semibold text-indigo-600">{formattedDateHeader}</span>
           </div>
           
-          <div className="grid grid-cols-2 gap-2.5">
-            <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-100 text-center">
-              <p className="text-2xl font-black text-emerald-700">{presentCount}</p>
-              <p className="text-[11px] font-bold text-emerald-600">Present</p>
+          {isHoliday ? (
+            <div className="p-3.5 rounded-2xl bg-amber-50/90 border border-amber-200 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                <Palmtree className="w-5 h-5 text-amber-600" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-black text-amber-900 truncate">{holidayInfo.reason || 'School Holiday'}</p>
+                <p className="text-[11px] font-bold text-amber-700/90">Official School Off &bull; Attendance Locked</p>
+              </div>
             </div>
-            <div className="p-3 rounded-2xl bg-rose-50 border border-rose-100 text-center">
-              <p className="text-2xl font-black text-rose-700">{absentCount}</p>
-              <p className="text-[11px] font-bold text-rose-600">Absent</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2.5">
+              <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-100 text-center">
+                <p className="text-2xl font-black text-emerald-700">{presentCount}</p>
+                <p className="text-[11px] font-bold text-emerald-600">Present</p>
+              </div>
+              <div className="p-3 rounded-2xl bg-rose-50 border border-rose-100 text-center">
+                <p className="text-2xl font-black text-rose-700">{absentCount}</p>
+                <p className="text-[11px] font-bold text-rose-600">Absent</p>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs font-semibold text-slate-500">
             <span>Daily Attendance Rate:</span>
-            <span className="font-bold text-indigo-600">{rate}%</span>
+            {isHoliday ? (
+              <span className="font-bold text-amber-700">Holiday (Non-working day)</span>
+            ) : (
+              <span className="font-bold text-indigo-600">{rate}%</span>
+            )}
           </div>
         </div>
 
@@ -313,40 +358,52 @@ export default function AttendanceTab({
 
                 {/* Right Actions: Notify Parent & Toggle for this date */}
                 <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-                  
-                  {/* Notify Absent Parent Button */}
-                  {!isPresent && (
-                    <button
-                      onClick={() => onOpenEmailSingle(st, 'attendance')}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200/80 text-[11px] font-bold text-amber-800 transition-colors"
-                      title="Send Absence Email to Parent"
+                  {isHoliday ? (
+                    /* Grayed out / blurred holiday icon, non-clickable */
+                    <div 
+                      className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-xl bg-slate-100/90 text-slate-400 border border-slate-200/80 backdrop-blur-xs grayscale opacity-60 cursor-not-allowed select-none"
+                      title={`${holidayInfo.reason || 'School Holiday'} (Off Day - Attendance Disabled)`}
                     >
-                      <Mail className="w-3.5 h-3.5 text-amber-600" />
-                      <span className="hidden xs:inline">Notify</span>
-                    </button>
-                  )}
+                      <Palmtree className="w-3.5 h-3.5 text-amber-500/80 shrink-0" />
+                      <span className="text-[11px] font-bold text-slate-500 tracking-wide">Holiday</span>
+                    </div>
+                  ) : (
+                    <>
+                      {/* Notify Absent Parent Button */}
+                      {!isPresent && (
+                        <button
+                          onClick={() => onOpenEmailSingle(st, 'attendance')}
+                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-amber-50 hover:bg-amber-100 border border-amber-200/80 text-[11px] font-bold text-amber-800 transition-colors"
+                          title="Send Absence Email to Parent"
+                        >
+                          <Mail className="w-3.5 h-3.5 text-amber-600" />
+                          <span className="hidden xs:inline">Notify</span>
+                        </button>
+                      )}
 
-                  {/* Toggle Attendance for Active Date */}
-                  <button
-                    onClick={() => onToggleAttendance(st.rollNo, activeDate)}
-                    className={`flex items-center gap-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl font-bold text-[11px] sm:text-xs transition-all shadow-sm ${
-                      isPresent
-                        ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-200'
-                        : 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-200'
-                    }`}
-                  >
-                    {isPresent ? (
-                      <>
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>PRESENT</span>
-                      </>
-                    ) : (
-                      <>
-                        <XCircle className="w-3.5 h-3.5" />
-                        <span>ABSENT</span>
-                      </>
-                    )}
-                  </button>
+                      {/* Toggle Attendance for Active Date */}
+                      <button
+                        onClick={() => onToggleAttendance(st.rollNo, activeDate)}
+                        className={`flex items-center gap-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl font-bold text-[11px] sm:text-xs transition-all shadow-sm ${
+                          isPresent
+                            ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-200'
+                            : 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-200'
+                        }`}
+                      >
+                        {isPresent ? (
+                          <>
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>PRESENT</span>
+                          </>
+                        ) : (
+                          <>
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>ABSENT</span>
+                          </>
+                        )}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             );
