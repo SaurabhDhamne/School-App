@@ -7,7 +7,8 @@ export default function StudentDetailModal({
   isOpen,
   onClose,
   student,
-  subjects,
+  subjects = [],
+  activeExam = 'Unit Test 1',
   onOpenEmailModal,
   getGrade,
   calculateTotal,
@@ -15,13 +16,16 @@ export default function StudentDetailModal({
 }) {
   if (!isOpen || !student) return null;
 
+  const activeSubjects = (subjects || []).filter(s => s.key !== 'all');
+  const totalMaxMarks = activeSubjects.reduce((sum, s) => sum + (Number(s.max) || 25), 0) || 100;
+
   const total = calculateTotal(student.marks);
   const percentage = calculatePercentage(student.marks);
   const gradeInfo = getGrade(percentage);
 
   const handleWhatsApp = () => {
     const text = encodeURIComponent(
-      `Hello! Sharing academic report for ${student.name} (Roll No: ${student.rollNo}). Total Marks: ${total}/125 (${percentage}%, Grade: ${gradeInfo.grade}).`
+      `Hello! Sharing academic report for ${student.name} (Roll No: ${student.rollNo}). Total Marks: ${total}/${totalMaxMarks} (${percentage}%, Grade: ${gradeInfo.grade}).`
     );
     window.open(`https://wa.me/?text=${text}`, '_blank');
   };
@@ -38,7 +42,7 @@ export default function StudentDetailModal({
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900">{student.name}</h3>
-              <p className="text-xs text-slate-400">Roll No: {student.rollNo} • Class 8-A</p>
+              <p className="text-xs text-slate-400">Roll No: {student.rollNo} • {student.className || 'Class 8-A'}</p>
             </div>
           </div>
           <button 
@@ -53,7 +57,7 @@ export default function StudentDetailModal({
         <div className="grid grid-cols-3 gap-3">
           <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 text-center">
             <p className="text-[11px] font-semibold text-slate-400">Total Score</p>
-            <p className="text-lg font-black text-slate-800 mt-0.5">{total} <span className="text-xs font-medium text-slate-400">/ 125</span></p>
+            <p className="text-lg font-black text-slate-800 mt-0.5">{total} <span className="text-xs font-medium text-slate-400">/ {totalMaxMarks}</span></p>
           </div>
           <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 text-center">
             <p className="text-[11px] font-semibold text-slate-400">Percentage</p>
@@ -69,11 +73,12 @@ export default function StudentDetailModal({
 
         {/* Subject Breakdown */}
         <div>
-          <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Subject Performance (Unit Test 1)</h4>
+          <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Subject Performance ({activeExam})</h4>
           <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden bg-white">
-            {subjects.filter(s => s.key !== 'all').map(sub => {
+            {activeSubjects.map(sub => {
               const score = student.marks?.[sub.key] ?? 0;
-              const subPct = ((score / 25) * 100).toFixed(0);
+              const maxMarks = sub.max || 25;
+              const subPct = Math.min(100, Math.max(0, ((score / maxMarks) * 100))).toFixed(0);
               return (
                 <div key={sub.key} className="p-3 flex items-center justify-between hover:bg-slate-50">
                   <span className="text-xs font-semibold text-slate-700 capitalize">{sub.label}</span>
@@ -82,7 +87,7 @@ export default function StudentDetailModal({
                       <div className="bg-indigo-600 h-1.5 rounded-full" style={{ width: `${subPct}%` }} />
                     </div>
                     <span className="text-xs font-bold text-slate-900 font-mono w-14 text-right">
-                      {score} / 25
+                      {score} / {maxMarks}
                     </span>
                   </div>
                 </div>

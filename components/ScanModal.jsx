@@ -29,18 +29,31 @@ export default function ScanModal({
   selectedDate,
   onApplyData,
   currentUser,
-  showToast
+  showToast,
+  subjects: propSubjects
 }) {
   const isSubjectTeacher = currentUser?.role === 'subject_teacher';
 
+  const subjects = propSubjects && propSubjects.length > 0 
+    ? propSubjects.filter(s => s.key !== 'all')
+    : [
+        { key: 'maths', label: 'Mathematics' },
+        { key: 'science', label: 'Science' },
+        { key: 'english', label: 'English' },
+        { key: 'social', label: 'Social Studies' },
+        { key: 'hindi', label: 'Hindi' },
+      ];
+
   const getTeacherSubjectKey = () => {
-    const s = (currentUser?.subject || '').toLowerCase();
+    const s = (currentUser?.subject || '').toLowerCase().trim();
+    const matched = subjects.find(sub => sub.label.toLowerCase() === s || sub.key.toLowerCase() === s);
+    if (matched) return matched.key;
     if (s.includes('science')) return 'science';
     if (s.includes('math')) return 'maths';
     if (s.includes('english')) return 'english';
     if (s.includes('social')) return 'social';
     if (s.includes('hindi')) return 'hindi';
-    return 'maths';
+    return subjects[0]?.key || 'maths';
   };
 
   const defaultSub = isSubjectTeacher ? getTeacherSubjectKey() : 'maths';
@@ -106,14 +119,6 @@ export default function ScanModal({
   }, [isOpen, initialType, currentUser, selectedDate]);
 
   if (!isOpen) return null;
-
-  const subjects = [
-    { key: 'maths', label: 'Mathematics' },
-    { key: 'science', label: 'Science' },
-    { key: 'english', label: 'English' },
-    { key: 'social', label: 'Social Studies' },
-    { key: 'hindi', label: 'Hindi' },
-  ];
 
   const handleImageSelected = (file) => {
     if (!file) return;

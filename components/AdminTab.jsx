@@ -31,9 +31,12 @@ import {
   Coffee,
   CalendarCheck,
   CalendarPlus,
-  Calendar
+  Calendar,
+  Award,
+  BookOpen,
+  Plus
 } from 'lucide-react';
-import { getSchoolConfig } from '@/lib/schoolConfig';
+import { getSchoolConfig, saveSchoolConfig } from '@/lib/schoolConfig';
 import { DEFAULT_GAZETTED_HOLIDAYS, getLocalCustomHolidays, saveLocalCustomHolidays } from '@/lib/holidays';
 
 export default function AdminTab({ 
@@ -41,11 +44,39 @@ export default function AdminTab({
   onRefreshStudents, 
   showToast,
   customHolidays = [],
-  onRefreshHolidays
+  onRefreshHolidays,
+  schoolConfig: externalSchoolConfig,
+  onUpdateConfig
 }) {
-  const [activeAdminSubTab, setActiveAdminSubTab] = useState('teachers'); // 'teachers' | 'students' | 'holidays'
+  const [activeAdminSubTab, setActiveAdminSubTab] = useState('teachers'); // 'teachers' | 'students' | 'holidays' | 'academics'
   const [selectedClassFilter, setSelectedClassFilter] = useState('all'); // 'all' | 'Class 8-A' | etc.
   const studentFileInputRef = useRef(null);
+
+  // Centralized School & Academic Configuration State
+  const [localConfig, setLocalConfig] = useState(() => externalSchoolConfig || getSchoolConfig());
+
+  useEffect(() => {
+    if (externalSchoolConfig) {
+      setLocalConfig(externalSchoolConfig);
+    }
+  }, [externalSchoolConfig]);
+
+  // Exam Modals & Academic State
+  const [isExamModalOpen, setIsExamModalOpen] = useState(false);
+  const [editingExam, setEditingExam] = useState(null);
+  const [examNameInput, setExamNameInput] = useState('');
+  const [setAsActiveOnSave, setSetAsActiveOnSave] = useState(false);
+  const [examToDelete, setExamToDelete] = useState(null);
+  const [isSavingExam, setIsSavingExam] = useState(false);
+
+  // Subject Modals State
+  const [isSubjectModalOpen, setIsSubjectModalOpen] = useState(false);
+  const [editingSubject, setEditingSubject] = useState(null);
+  const [subjectLabelInput, setSubjectLabelInput] = useState('');
+  const [subjectMaxMarksInput, setSubjectMaxMarksInput] = useState(25);
+  const [subjectTeacherInput, setSubjectTeacherInput] = useState('');
+  const [subjectToDelete, setSubjectToDelete] = useState(null);
+  const [isSavingSubject, setIsSavingSubject] = useState(false);
 
   // Holidays state
   const [localHolidays, setLocalHolidays] = useState(() => customHolidays.length > 0 ? customHolidays : getLocalCustomHolidays());
@@ -76,8 +107,26 @@ export default function AdminTab({
         'Class 7-B',
       ];
 
-  // Teachers State
-  const [teachers, setTeachers] = useState([]);
+  // Fallback Faculty Roster to ensure dropdowns are never blank
+  const DEFAULT_TEACHERS = [
+    { id: 't1', name: 'Mrs. Priya Sharma', email: 'priya@myschool.com', role: 'class_teacher', class_name: 'Class 8-A', subject: 'Mathematics' },
+    { id: 't2', name: 'Mr. Rajesh Patel', email: 'rajesh@myschool.com', role: 'subject_teacher', class_name: 'Class 8-A', subject: 'Science' },
+    { id: 't3', name: 'Mrs. Sunita Verma', email: 'sunita@myschool.com', role: 'subject_teacher', class_name: 'Class 8-A', subject: 'English' }
+  ];
+
+  // Teachers State with localStorage cache & default fallback
+  const [teachers, setTeachers] = useState(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('myschool_teachers_cache');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (e) {}
+    }
+    return DEFAULT_TEACHERS;
+  });
   const [isLoadingTeachers, setIsLoadingTeachers] = useState(false);
 
   // Clean Slate & Demo Onboarding Modals
@@ -118,11 +167,14 @@ export default function AdminTab({
     try {
       const res = await fetch('/api/auth');
       const data = await res.json();
-      if (data.success && data.teachers) {
+      if (data.success && Array.isArray(data.teachers) && data.teachers.length > 0) {
         setTeachers(data.teachers);
+        try {
+          localStorage.setItem('myschool_teachers_cache', JSON.stringify(data.teachers));
+        } catch (e) {}
       }
     } catch (e) {
-      console.error(e);
+      console.warn('Could not fetch remote teachers, using local fallback:', e);
     } finally {
       setIsLoadingTeachers(false);
     }
@@ -555,92 +607,442 @@ export default function AdminTab({
     }
   };
 
+  // ---------------- Academic & Exam Management Handlers ----------------
+  const handleOpenAddExam = () => {
+    const currentExams = localConfig.exams || [];
+    if (currentExams.length >= 4) {
+      showToast('⚠️ Maximum limit reached: You can configure up to 4 exams for this academic year.');
+      return;
+    }
+    setEditingExam(null);
+    setExamNameInput('');
+    setSetAsActiveOnSave(false);
+    setIsExamModalOpen(true);
+  };
+
+  const handleOpenEditExam = (exam) => {
+    setEditingExam(exam);
+    setExamNameInput(exam.name);
+    setSetAsActiveOnSave(localConfig.activeExam === exam.name);
+    setIsExamModalOpen(true);
+  };
+
+  const handleSaveExam = async (e) => {
+    e.preventDefault();
+    if (!examNameInput.trim()) {
+      showToast('⚠️ Please enter an examination name');
+      return;
+    }
+    const trimmedExamName = examNameInput.trim();
+
+    // 1. Instant Optimistic UI Update
+    let updatedExams = [...(localConfig.exams || [])];
+    if (editingExam) {
+      updatedExams = updatedExams.map(ex => ex.id === editingExam.id ? { ...ex, name: trimmedExamName } : ex);
+    } else {
+      updatedExams.push({
+        id: `exam_${Date.now()}`,
+        name: trimmedExamName
+      });
+    }
+
+    let updatedConfig = {
+      ...localConfig,
+      exams: updatedExams
+    };
+
+    if (setAsActiveOnSave) {
+      updatedConfig.activeExam = trimmedExamName;
+    }
+
+    setLocalConfig(updatedConfig);
+    saveSchoolConfig(updatedConfig);
+    onUpdateConfig?.('save_all', { config: updatedConfig });
+    setIsExamModalOpen(false);
+    showToast(editingExam ? `✅ Renamed examination to "${trimmedExamName}"` : `🎉 Added examination "${trimmedExamName}"`);
+
+    // 2. Background Sync to Server & Database
+    setIsSavingExam(true);
+    try {
+      if (editingExam) {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'rename_exam', id: editingExam.id, name: trimmedExamName })
+        });
+        const data = await res.json();
+        if (data.success && data.config) {
+          let syncedConfig = data.config;
+          if (setAsActiveOnSave && data.config.activeExam !== trimmedExamName) {
+            await fetch('/api/config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'set_active_exam', examName: trimmedExamName })
+            });
+            syncedConfig = { ...syncedConfig, activeExam: trimmedExamName };
+          }
+          setLocalConfig(syncedConfig);
+          saveSchoolConfig(syncedConfig);
+          onUpdateConfig?.('save_all', { config: syncedConfig });
+        }
+      } else {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'add_exam', name: trimmedExamName })
+        });
+        const data = await res.json();
+        if (data.success && data.config) {
+          let syncedConfig = data.config;
+          if (setAsActiveOnSave && data.newExam) {
+            await fetch('/api/config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'set_active_exam', examName: data.newExam.name })
+            });
+            syncedConfig = { ...syncedConfig, activeExam: data.newExam.name };
+          }
+          setLocalConfig(syncedConfig);
+          saveSchoolConfig(syncedConfig);
+          onUpdateConfig?.('save_all', { config: syncedConfig });
+        }
+      }
+    } catch (err) {
+      console.warn('Background sync for exam (saved locally):', err);
+    } finally {
+      setIsSavingExam(false);
+    }
+  };
+
+  const handleSetActiveExam = async (examName) => {
+    // 1. Instant Optimistic UI Update: badge and button switch immediately
+    const updatedConfig = {
+      ...localConfig,
+      activeExam: examName
+    };
+    setLocalConfig(updatedConfig);
+    saveSchoolConfig(updatedConfig);
+    onUpdateConfig?.('save_all', { config: updatedConfig });
+    showToast(`🎯 Active examination set to "${examName}" across all classes`);
+
+    // 2. Background Sync to Server & Database
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set_active_exam', examName })
+      });
+      const data = await res.json();
+      if (data.success && data.config) {
+        setLocalConfig(data.config);
+        saveSchoolConfig(data.config);
+        onUpdateConfig?.('save_all', { config: data.config });
+      }
+    } catch (err) {
+      console.warn('Background server sync for active exam (saved locally):', err);
+    }
+  };
+
+  const handleDeleteExam = async () => {
+    if (!examToDelete) return;
+    const currentExams = localConfig.exams || [];
+    if (currentExams.length <= 1) {
+      showToast('⚠️ Cannot delete: At least one exam must remain in the school calendar.');
+      setExamToDelete(null);
+      return;
+    }
+
+    // 1. Instant optimistic update
+    const filteredExams = currentExams.filter(ex => ex.id !== examToDelete.id);
+    let newActive = localConfig.activeExam;
+    if (localConfig.activeExam === examToDelete.name) {
+      newActive = filteredExams[0]?.name || 'Final Exam';
+    }
+    const updatedConfig = {
+      ...localConfig,
+      exams: filteredExams,
+      activeExam: newActive
+    };
+    setLocalConfig(updatedConfig);
+    saveSchoolConfig(updatedConfig);
+    onUpdateConfig?.('save_all', { config: updatedConfig });
+    showToast(`🗑️ Removed examination: "${examToDelete.name}"`);
+    const examToRemove = examToDelete;
+    setExamToDelete(null);
+
+    // 2. Background sync
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_exam', id: examToRemove.id })
+      });
+      const data = await res.json();
+      if (data.success && data.config) {
+        setLocalConfig(data.config);
+        saveSchoolConfig(data.config);
+        onUpdateConfig?.('save_all', { config: data.config });
+      }
+    } catch (err) {
+      console.warn('Background sync for delete exam:', err);
+    }
+  };
+
+  // ---------------- Subject & Max Marks Management Handlers ----------------
+  const handleOpenAddSubject = () => {
+    const currentSubs = localConfig.subjects || [];
+    if (currentSubs.length >= 10) {
+      showToast('⚠️ Maximum limit reached: You can configure up to 10 curriculum subjects.');
+      return;
+    }
+    setEditingSubject(null);
+    setSubjectLabelInput('');
+    setSubjectMaxMarksInput(25);
+    setSubjectTeacherInput('');
+    setIsSubjectModalOpen(true);
+  };
+
+  const handleOpenEditSubject = (sub) => {
+    setEditingSubject(sub);
+    setSubjectLabelInput(sub.label);
+    setSubjectMaxMarksInput(sub.max || 25);
+    // Auto-detect and pre-fill the teacher currently assigned:
+    const assigned = sub.assignedTeacherName || 
+      teachers.find(t => (t.subject || '').toLowerCase() === (sub.label || '').toLowerCase())?.name || 
+      '';
+    setSubjectTeacherInput(assigned);
+    setIsSubjectModalOpen(true);
+  };
+
+  const handleSaveSubject = async (e) => {
+    e.preventDefault();
+    if (!subjectLabelInput.trim()) {
+      showToast('⚠️ Please enter a subject name');
+      return;
+    }
+    const maxMarksNum = Number(subjectMaxMarksInput);
+    if (isNaN(maxMarksNum) || maxMarksNum <= 0) {
+      showToast('⚠️ Please enter a valid maximum marks number (e.g. 25, 50, 100)');
+      return;
+    }
+
+    const trimmedLabel = subjectLabelInput.trim();
+    const assignedTeacher = subjectTeacherInput || null;
+
+    // 1. Instant optimistic UI update
+    let updatedSubjects = [...(localConfig.subjects || [])];
+    if (editingSubject) {
+      updatedSubjects = updatedSubjects.map(s => 
+        s.key === editingSubject.key 
+          ? { ...s, label: trimmedLabel, max: maxMarksNum, assignedTeacherName: assignedTeacher }
+          : s
+      );
+    } else {
+      const newKey = trimmedLabel.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      updatedSubjects.push({
+        key: newKey,
+        label: trimmedLabel,
+        max: maxMarksNum,
+        assignedTeacherName: assignedTeacher
+      });
+    }
+
+    const updatedConfig = { ...localConfig, subjects: updatedSubjects };
+    setLocalConfig(updatedConfig);
+    saveSchoolConfig(updatedConfig);
+    onUpdateConfig?.('save_all', { config: updatedConfig });
+    setIsSubjectModalOpen(false);
+    showToast(editingSubject ? `✅ Updated subject "${trimmedLabel}" (${maxMarksNum} marks)` : `🎉 Added subject "${trimmedLabel}" (${maxMarksNum} marks)`);
+
+    // 2. Background sync to server & persistent storage
+    setIsSavingSubject(true);
+    try {
+      if (editingSubject) {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'update_subject',
+            key: editingSubject.key,
+            label: trimmedLabel,
+            maxMarks: maxMarksNum,
+            assignedTeacherName: assignedTeacher
+          })
+        });
+        const data = await res.json();
+        if (data.success && data.config) {
+          setLocalConfig(data.config);
+          saveSchoolConfig(data.config);
+          onUpdateConfig?.('save_all', { config: data.config });
+        }
+      } else {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'add_subject',
+            label: trimmedLabel,
+            maxMarks: maxMarksNum,
+            assignedTeacherName: assignedTeacher
+          })
+        });
+        const data = await res.json();
+        if (data.success && data.config) {
+          setLocalConfig(data.config);
+          saveSchoolConfig(data.config);
+          onUpdateConfig?.('save_all', { config: data.config });
+        }
+      }
+    } catch (err) {
+      console.warn('Background sync for subject (saved locally):', err);
+    } finally {
+      setIsSavingSubject(false);
+    }
+  };
+
+  const handleDeleteSubject = async () => {
+    if (!subjectToDelete) return;
+    const currentSubs = localConfig.subjects || [];
+    if (currentSubs.length <= 1) {
+      showToast('⚠️ Cannot delete: At least one subject must remain in the curriculum.');
+      setSubjectToDelete(null);
+      return;
+    }
+
+    // 1. Instant optimistic update
+    const filteredSubs = currentSubs.filter(s => s.key !== subjectToDelete.key);
+    const updatedConfig = {
+      ...localConfig,
+      subjects: filteredSubs
+    };
+    setLocalConfig(updatedConfig);
+    saveSchoolConfig(updatedConfig);
+    onUpdateConfig?.('save_all', { config: updatedConfig });
+    showToast(`🗑️ Removed subject: "${subjectToDelete.label}"`);
+    const subToRemove = subjectToDelete;
+    setSubjectToDelete(null);
+
+    // 2. Background sync
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_subject', key: subToRemove.key })
+      });
+      const data = await res.json();
+      if (data.success && data.config) {
+        setLocalConfig(data.config);
+        saveSchoolConfig(data.config);
+        onUpdateConfig?.('save_all', { config: data.config });
+      }
+    } catch (err) {
+      console.warn('Background sync for delete subject:', err);
+    }
+  };
+
   return (
-    <div className="flex flex-col gap-6 max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <div className="flex flex-col gap-4 sm:gap-6 max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
       
       {/* Top Admin Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-amber-600 via-amber-700 to-indigo-950 p-5 sm:p-6 rounded-3xl text-white shadow-xl shadow-amber-900/10">
-        <div className="flex items-center gap-3.5 sm:gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-amber-300 shrink-0">
-            <ShieldCheck className="w-7 h-7" />
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-5 bg-gradient-to-r from-amber-600 via-amber-700 to-indigo-950 p-4 sm:p-6 rounded-3xl text-white shadow-xl shadow-amber-900/15 border border-amber-500/25">
+        <div className="flex items-start sm:items-center gap-3 sm:gap-4">
+          <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-amber-300 shrink-0 shadow-inner">
+            <ShieldCheck className="w-6 h-6 sm:w-7 sm:h-7" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg sm:text-xl font-black">MySchool Administrator Control</h2>
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-400 text-amber-950">
-                MASTER ADMIN
+          <div className="flex flex-col gap-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base sm:text-xl font-black text-white leading-tight">
+                MySchool Administrator Control
+              </h2>
+              {/* Master Admin Badge with prominent clean border */}
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-200 border-2 border-amber-300/80 text-[10px] font-black uppercase tracking-wider shadow-sm backdrop-blur-md shrink-0">
+                <ShieldCheck className="w-3 h-3 text-amber-300" />
+                <span>Master Admin</span>
               </span>
             </div>
-            <p className="text-xs text-amber-100/80 mt-0.5">
+            <p className="text-[11px] sm:text-xs text-amber-100/80 leading-relaxed">
               Manage faculty roster, edit teacher credentials, and control student enrollment.
             </p>
           </div>
         </div>
 
-        {/* Sub-tab Pill Toggles */}
-        <div className="flex items-center gap-1.5 sm:gap-2 bg-black/20 p-1 rounded-2xl border border-white/10 self-start sm:self-auto overflow-x-auto">
+        {/* Sub-tab Pill Toggles: Perfectly balanced 2x2 grid on mobile, 4-col on desktop */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-black/30 p-1.5 rounded-2xl border border-white/15 w-full lg:w-auto shrink-0 shadow-inner">
           <button
             onClick={() => setActiveAdminSubTab('teachers')}
-            className={`flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center justify-center gap-1.5 px-2.5 py-2 sm:px-3 sm:py-2 rounded-xl text-xs font-bold transition-all ${
               activeAdminSubTab === 'teachers'
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-amber-100 hover:text-white'
+                ? 'bg-white text-slate-900 shadow-md shadow-black/10'
+                : 'text-amber-100/90 hover:text-white hover:bg-white/10'
             }`}
           >
-            <UserCheck className="w-4 h-4" />
-            <span>Teachers ({teachers.length})</span>
+            <UserCheck className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Teachers <span className="opacity-70 text-[10px]">({teachers.length})</span></span>
           </button>
           <button
             onClick={() => setActiveAdminSubTab('students')}
-            className={`flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center justify-center gap-1.5 px-2.5 py-2 sm:px-3 sm:py-2 rounded-xl text-xs font-bold transition-all ${
               activeAdminSubTab === 'students'
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-amber-100 hover:text-white'
+                ? 'bg-white text-slate-900 shadow-md shadow-black/10'
+                : 'text-amber-100/90 hover:text-white hover:bg-white/10'
             }`}
           >
-            <GraduationCap className="w-4 h-4" />
-            <span>Students ({students.length})</span>
+            <GraduationCap className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Students <span className="opacity-70 text-[10px]">({students.length})</span></span>
           </button>
           <button
             onClick={() => setActiveAdminSubTab('holidays')}
-            className={`flex items-center gap-2 px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center justify-center gap-1.5 px-2.5 py-2 sm:px-3 sm:py-2 rounded-xl text-xs font-bold transition-all ${
               activeAdminSubTab === 'holidays'
-                ? 'bg-white text-slate-900 shadow-sm'
-                : 'text-amber-100 hover:text-white'
+                ? 'bg-white text-slate-900 shadow-md shadow-black/10'
+                : 'text-amber-100/90 hover:text-white hover:bg-white/10'
             }`}
           >
-            <Palmtree className="w-4 h-4" />
-            <span>Holidays ({localHolidays.length})</span>
+            <Palmtree className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Holidays <span className="opacity-70 text-[10px]">({localHolidays.length})</span></span>
+          </button>
+          <button
+            onClick={() => setActiveAdminSubTab('academics')}
+            className={`flex items-center justify-center gap-1.5 px-2.5 py-2 sm:px-3 sm:py-2 rounded-xl text-xs font-bold transition-all ${
+              activeAdminSubTab === 'academics'
+                ? 'bg-white text-slate-900 shadow-md shadow-black/10'
+                : 'text-amber-100/90 hover:text-white hover:bg-white/10'
+            }`}
+          >
+            <Award className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Academics <span className="opacity-70 text-[10px]">({localConfig?.subjects?.length || 5})</span></span>
           </button>
         </div>
       </div>
 
       {/* Quick School Onboarding & Data Management Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
-          <span className="text-xs font-bold text-slate-700">School Onboarding & Database State:</span>
-          <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 sm:px-5 sm:py-3.5 bg-white rounded-2xl border border-slate-200/80 shadow-xs">
+        <div className="flex flex-wrap items-center justify-between sm:justify-start gap-2">
+          <div className="flex items-center gap-1.5">
+            <Sparkles className="w-4 h-4 text-amber-500 shrink-0" />
+            <span className="text-xs font-bold text-slate-700">School Onboarding & State:</span>
+          </div>
+          <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-700 font-bold border border-slate-200/60">
             {students.length} Students &bull; {teachers.length} Teachers
           </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-2 sm:flex sm:items-center gap-2">
           <button
             onClick={() => setIsResetModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition-colors"
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition-colors"
             title="Clear all demo students and teachers to onboard a brand new school"
           >
-            <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-            <span>Clean Slate (0 Records)</span>
+            <Trash2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+            <span>Clean Slate</span>
           </button>
           <button
             onClick={() => setIsDemoModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-colors"
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition-colors"
             title="Restore sample demo data for presentation and testing"
           >
-            <RefreshCw className="w-3.5 h-3.5 text-indigo-500" />
-            <span>Load Demo Data</span>
+            <RefreshCw className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+            <span>Load Demo</span>
           </button>
         </div>
       </div>
@@ -657,7 +1059,7 @@ export default function AdminTab({
             </div>
             <button
               onClick={handleOpenAddTeacher}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-100 transition-all self-start sm:self-auto"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-100 transition-all"
             >
               <UserPlus className="w-4 h-4" />
               <span>Add New Teacher</span>
@@ -665,7 +1067,7 @@ export default function AdminTab({
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse text-xs min-w-[540px]">
               <thead>
                 <tr className="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                   <th className="py-3.5 px-4 sm:px-6">Teacher Name</th>
@@ -695,11 +1097,11 @@ export default function AdminTab({
                         {t.name.charAt(0)}
                       </div>
                       <div className="truncate max-w-[140px] sm:max-w-none">
-                        <p className="truncate">{t.name}</p>
+                        <p className="truncate whitespace-nowrap">{t.name}</p>
                         <p className="text-[10px] text-slate-400 font-normal md:hidden">{t.email}</p>
                       </div>
                     </td>
-                    <td className="py-3.5 px-3 sm:px-4">
+                    <td className="py-3.5 px-3 sm:px-4 whitespace-nowrap">
                       <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold border ${
                         t.role === 'class_teacher' 
                           ? 'bg-indigo-50 text-indigo-700 border-indigo-200' 
@@ -708,8 +1110,10 @@ export default function AdminTab({
                         {t.role === 'class_teacher' ? 'Class Teacher' : 'Subject Teacher'}
                       </span>
                     </td>
-                    <td className="py-3.5 px-3 sm:px-4 font-semibold text-slate-600">
-                      {t.class_name || 'Class 8-A'}
+                    <td className="py-3.5 px-3 sm:px-4 font-semibold text-slate-600 whitespace-nowrap">
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200/80 text-indigo-700 font-bold text-[11px] whitespace-nowrap shadow-2xs">
+                        {t.class_name || 'Class 8-A'}
+                      </span>
                     </td>
                     <td className="py-3.5 px-3 sm:px-4 font-semibold text-slate-600">
                       {t.subject || 'General'}
@@ -761,7 +1165,7 @@ export default function AdminTab({
           />
 
           {/* Section Header with Action Buttons */}
-          <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-base font-bold text-slate-800">Student Enrollment Roster</h3>
@@ -772,10 +1176,10 @@ export default function AdminTab({
               <p className="text-xs text-slate-400 mt-0.5">Filter by class or bulk-enroll students with Excel / CSV upload.</p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
               <button
                 onClick={handleDownloadStudentTemplate}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs shadow-xs transition-all"
+                className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-xs shadow-xs transition-all"
                 title="Download Sample Student Enrollment Excel Template"
               >
                 <Download className="w-3.5 h-3.5" />
@@ -784,7 +1188,7 @@ export default function AdminTab({
 
               <button
                 onClick={() => studentFileInputRef.current?.click()}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200 text-emerald-800 font-bold text-xs shadow-xs transition-all"
+                className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200 text-emerald-800 font-bold text-xs shadow-xs transition-all"
                 title="Bulk enroll students via Excel or CSV"
               >
                 <Upload className="w-3.5 h-3.5 text-emerald-600" />
@@ -793,7 +1197,7 @@ export default function AdminTab({
 
               <button
                 onClick={handleOpenAddStudent}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-100 transition-all"
+                className="col-span-2 sm:col-auto flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-100 transition-all"
               >
                 <UserPlus className="w-4 h-4" />
                 <span>Add Student</span>
@@ -802,7 +1206,10 @@ export default function AdminTab({
           </div>
 
           {/* Interactive Class Filter Bar */}
-          <div className="px-4 sm:px-5 py-3 bg-slate-50/70 border-b border-slate-100 flex items-center gap-2 overflow-x-auto">
+          <div 
+            className="px-4 sm:px-5 py-3 bg-slate-50/70 border-b border-slate-100 flex items-center gap-2 overflow-x-auto"
+            style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+          >
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider shrink-0 flex items-center gap-1">
               <Filter className="w-3 h-3 text-slate-400" />
               <span>Class:</span>
@@ -841,7 +1248,7 @@ export default function AdminTab({
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="w-full text-left border-collapse text-xs min-w-[540px]">
               <thead>
                 <tr className="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                   <th className="py-3.5 px-4 sm:px-6">Roll No</th>
@@ -858,15 +1265,15 @@ export default function AdminTab({
                   : students.filter(s => (s.className || 'Class 8-A') === selectedClassFilter)
                 ).map(st => (
                   <tr key={`${st.className || '8A'}_${st.rollNo}`} className="hover:bg-slate-50/70 transition-colors">
-                    <td className="py-3.5 px-4 sm:px-6 font-mono font-bold text-slate-500">
+                    <td className="py-3.5 px-4 sm:px-6 font-mono font-bold text-slate-500 whitespace-nowrap">
                       #{st.rollNo}
                     </td>
                     <td className="py-3.5 px-3 sm:px-4 font-bold text-slate-800">
-                      <p>{st.name}</p>
+                      <p className="whitespace-nowrap">{st.name}</p>
                       <p className="text-[10px] text-slate-400 font-normal md:hidden">{st.parentEmail}</p>
                     </td>
-                    <td className="py-3.5 px-3 sm:px-4 font-semibold text-slate-600">
-                      <span className="px-2 py-0.5 rounded-md bg-indigo-50 border border-indigo-100 text-indigo-700 font-bold text-[10px]">
+                    <td className="py-3.5 px-3 sm:px-4 font-semibold text-slate-600 whitespace-nowrap">
+                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200/80 text-indigo-700 font-bold text-[11px] whitespace-nowrap shadow-2xs">
                         {st.className || 'Class 8-A'}
                       </span>
                     </td>
@@ -876,7 +1283,7 @@ export default function AdminTab({
                     <td className="py-3.5 px-3 sm:px-4 text-slate-500 font-mono hidden sm:table-cell">
                       {st.parentPhone || '—'}
                     </td>
-                    <td className="py-3.5 px-4 sm:px-6 text-right">
+                    <td className="py-3.5 px-4 sm:px-6 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1.5">
                         <button
                           onClick={() => handleOpenEditStudent(st)}
@@ -1091,6 +1498,202 @@ export default function AdminTab({
       )}
 
       {/* ========================================================= */}
+      {/* 4. ACADEMIC EXAMS & SUBJECT CURRICULUM MANAGEMENT          */}
+      {/* ========================================================= */}
+      {activeAdminSubTab === 'academics' && (
+        <div className="flex flex-col gap-5">
+          
+          {/* CARD 1: EXAMINATIONS & ACTIVE TERM */}
+          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden flex flex-col">
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-800">Examination Calendar & Active Term</h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    {localConfig.exams?.length || 0} Configured
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Configure examinations and select which exam is currently active for marksheet entry and report cards.
+                </p>
+              </div>
+              <button
+                onClick={handleOpenAddExam}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-100 transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Exam</span>
+              </button>
+            </div>
+
+            <div className="p-4 sm:p-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                {(localConfig.exams || []).map((exam) => {
+                  const isActive = (localConfig.activeExam || 'Unit Test 1') === exam.name;
+                  return (
+                    <div 
+                      key={exam.id}
+                      className={`relative p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 ${
+                        isActive 
+                          ? 'bg-gradient-to-br from-indigo-50/70 via-white to-indigo-50/40 border-indigo-300 shadow-sm' 
+                          : 'bg-white border-slate-200/90 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                            isActive ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            <Award className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="text-sm font-bold text-slate-800 leading-snug truncate">{exam.name}</h4>
+                            <p className="text-[10px] text-slate-400 font-medium">Academic Term</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => handleOpenEditExam(exam)}
+                            className="w-7 h-7 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer"
+                            title="Rename exam"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setExamToDelete(exam)}
+                            className="w-7 h-7 rounded-lg hover:bg-rose-50 flex items-center justify-center text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                            title="Delete exam"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                        {isActive ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100/80 text-emerald-800 text-[11px] font-bold">
+                            <Check className="w-3 h-3 text-emerald-600 stroke-[3]" />
+                            <span>Active for Marks</span>
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleSetActiveExam(exam.name)}
+                            className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded-lg hover:bg-indigo-50 transition-colors cursor-pointer"
+                          >
+                            Make Active
+                          </button>
+                        )}
+                        <span className="text-[10px] text-slate-400 font-mono">#{exam.id.slice(-4)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* CARD 2: CURRICULUM SUBJECTS & MAX MARKS & TEACHER ASSIGNMENT */}
+          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden flex flex-col">
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-800">Curriculum Subjects & Evaluation Scale</h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    {localConfig.subjects?.length || 0} Subjects
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Configure subjects, maximum marks (e.g., 25, 50, 80, 100), and designate primary faculty teachers.
+                </p>
+              </div>
+              <button
+                onClick={handleOpenAddSubject}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-100 transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Subject</span>
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[560px]">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    <th className="py-3 px-4 sm:px-6">Subject</th>
+                    <th className="py-3 px-4 text-center">Max Marks</th>
+                    <th className="py-3 px-4">Assigned Teacher</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs font-medium">
+                  {(localConfig.subjects || []).map((sub) => {
+                    const assignedTeacher = teachers.find(t => t.name === sub.assignedTeacherName) || 
+                                           teachers.find(t => (t.subject || '').toLowerCase() === sub.label.toLowerCase());
+                    return (
+                      <tr key={sub.key} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="py-3 px-4 sm:px-6">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 font-bold text-xs">
+                              {sub.label.charAt(0)}
+                            </div>
+                            <div>
+                              <span className="font-bold text-slate-800 text-sm">{sub.label}</span>
+                              <p className="text-[10px] text-slate-400 font-mono">key: {sub.key}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-center">
+                          <span className="inline-flex items-center px-3 py-1 rounded-full bg-slate-100 font-bold text-slate-700 border border-slate-200">
+                            {sub.max || 25} Marks
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          {sub.assignedTeacherName ? (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/60">
+                              <UserCheck className="w-3.5 h-3.5 text-indigo-600" />
+                              <span>{sub.assignedTeacherName}</span>
+                            </span>
+                          ) : assignedTeacher ? (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-50 text-slate-600 font-medium border border-slate-200">
+                              <UserCheck className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{assignedTeacher.name} <span className="text-[10px] text-slate-400">(matched)</span></span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-slate-50 text-slate-400 text-[11px] font-medium border border-slate-200/60">
+                              Unassigned
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => handleOpenEditSubject(sub)}
+                              className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-500 hover:text-indigo-600 transition-colors cursor-pointer"
+                              title="Edit subject & max marks"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => setSubjectToDelete(sub)}
+                              className="w-8 h-8 rounded-lg hover:bg-rose-50 flex items-center justify-center text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                              title="Delete subject"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* ========================================================= */}
       {/* MODAL: ADD / EDIT TEACHER (With Password Change Field)    */}
       {/* ========================================================= */}
       {isTeacherModalOpen && (
@@ -1141,11 +1744,9 @@ export default function AdminTab({
                     onChange={(e) => setTeacherSubject(e.target.value)}
                     className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold text-slate-800 appearance-none pr-8 cursor-pointer"
                   >
-                    <option value="Mathematics">Mathematics</option>
-                    <option value="Science">Science</option>
-                    <option value="English">English</option>
-                    <option value="Social Studies">Social Studies</option>
-                    <option value="Hindi">Hindi</option>
+                    {(localConfig.subjects || []).map((sub) => (
+                      <option key={sub.key} value={sub.label}>{sub.label}</option>
+                    ))}
                   </select>
                   <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3 pointer-events-none" />
                 </div>
@@ -1600,6 +2201,268 @@ export default function AdminTab({
                 className="py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-200"
               >
                 Remove
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: ADD / EDIT EXAMINATION                              */}
+      {/* ========================================================= */}
+      {isExamModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-100 flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <Award className="w-4 h-4" />
+                </div>
+                <h3 className="text-base font-bold text-slate-800">
+                  {editingExam ? `Rename Examination: ${editingExam.name}` : 'Add New Examination'}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setIsExamModalOpen(false)}
+                className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveExam} className="flex flex-col gap-3.5">
+              <div>
+                <label className="text-xs font-semibold text-slate-600">Examination Name</label>
+                <input 
+                  type="text" 
+                  required
+                  placeholder="e.g. Mid-Term Examination, Unit Test 3, Final Board Exam"
+                  value={examNameInput} 
+                  onChange={(e) => setExamNameInput(e.target.value)}
+                  className="w-full text-xs px-3 py-2.5 rounded-xl border border-slate-200 mt-1 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold text-slate-800"
+                />
+              </div>
+
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col gap-2">
+                <label className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={setAsActiveOnSave}
+                    onChange={(e) => setSetAsActiveOnSave(e.target.checked)}
+                    className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                  />
+                  <div className="flex flex-col">
+                    <span className="text-xs font-bold text-slate-800">Set as currently active examination</span>
+                    <span className="text-[10px] text-slate-400">Teachers will record and view marks for this exam</span>
+                  </div>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsExamModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingExam}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-100"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isSavingExam ? 'Saving...' : editingExam ? 'Update Exam' : 'Add Exam'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: CONFIRM DELETE EXAMINATION                          */}
+      {/* ========================================================= */}
+      {examToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-slate-100 flex flex-col gap-4 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 mx-auto flex items-center justify-center">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="text-base font-bold text-slate-900">Delete Examination?</h4>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Are you sure you want to delete <strong>{examToDelete.name}</strong> from the school calendar?
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setExamToDelete(null)}
+                className="py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteExam}
+                className="py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-200"
+              >
+                Delete Exam
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: ADD / EDIT SUBJECT                                  */}
+      {/* ========================================================= */}
+      {isSubjectModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl border border-slate-100 flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <BookOpen className="w-4 h-4" />
+                </div>
+                <h3 className="text-base font-bold text-slate-800">
+                  {editingSubject ? `Edit Subject: ${editingSubject.label}` : 'Add Curriculum Subject'}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setIsSubjectModalOpen(false)}
+                className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveSubject} className="flex flex-col gap-3.5">
+              <div>
+                <label className="text-xs font-semibold text-slate-600">Subject Name</label>
+                <input 
+                  type="text" 
+                  required
+                  placeholder="e.g. Computer Science, Social Studies, Sanskrit"
+                  value={subjectLabelInput} 
+                  onChange={(e) => setSubjectLabelInput(e.target.value)}
+                  className="w-full text-xs px-3 py-2.5 rounded-xl border border-slate-200 mt-1 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold text-slate-800"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-600">Maximum Marks</label>
+                  <span className="text-[10px] text-slate-400">Total scale for this subject</span>
+                </div>
+                <input 
+                  type="number" 
+                  required
+                  min="1"
+                  max="200"
+                  value={subjectMaxMarksInput} 
+                  onChange={(e) => setSubjectMaxMarksInput(e.target.value)}
+                  className="w-full text-xs px-3 py-2.5 rounded-xl border border-slate-200 mt-1 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold text-slate-800"
+                />
+                {/* Quick Presets for fast 1-click selection */}
+                <div className="flex items-center gap-1.5 mt-2">
+                  <span className="text-[10px] text-slate-400 font-medium">Quick presets:</span>
+                  {[25, 50, 80, 100].map(val => (
+                    <button
+                      type="button"
+                      key={val}
+                      onClick={() => setSubjectMaxMarksInput(val)}
+                      className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-colors ${
+                        Number(subjectMaxMarksInput) === val 
+                          ? 'bg-indigo-600 text-white border-indigo-600' 
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {val}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-600">Assigned Primary Teacher</label>
+                <div className="relative mt-1">
+                  <select
+                    value={subjectTeacherInput}
+                    onChange={(e) => setSubjectTeacherInput(e.target.value)}
+                    className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-semibold text-slate-800 appearance-none pr-8 cursor-pointer"
+                  >
+                    <option value="">— Unassigned (Any authorized teacher) —</option>
+                    {subjectTeacherInput && !teachers.some(t => t.name === subjectTeacherInput) && (
+                      <option value={subjectTeacherInput}>
+                        {subjectTeacherInput} (Currently Assigned)
+                      </option>
+                    )}
+                    {teachers.map(t => (
+                      <option key={t.id} value={t.name}>
+                        {t.name} ({t.role === 'class_teacher' ? `Class Teacher ${t.class_name || ''}` : `${t.subject || 'Faculty'}`})
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3 pointer-events-none" />
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Assigning a teacher gives them direct marks entry permission for this subject.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsSubjectModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingSubject}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-md shadow-indigo-100"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isSavingSubject ? 'Saving...' : editingSubject ? 'Update Subject' : 'Add Subject'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: CONFIRM DELETE SUBJECT                              */}
+      {/* ========================================================= */}
+      {subjectToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-slate-100 flex flex-col gap-4 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 mx-auto flex items-center justify-center">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="text-base font-bold text-slate-900">Delete Subject?</h4>
+              <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+                Are you sure you want to remove <strong>{subjectToDelete.label}</strong> from curriculum and marksheets?
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setSubjectToDelete(null)}
+                className="py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteSubject}
+                className="py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-200"
+              >
+                Delete Subject
               </button>
             </div>
           </div>

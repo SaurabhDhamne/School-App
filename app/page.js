@@ -16,7 +16,7 @@ import AuthModal from '@/components/AuthModal';
 import ProfileModal from '@/components/ProfileModal';
 import HomeworkSection from '@/components/HomeworkSection';
 import ParentPortalView from '@/components/ParentPortalView';
-import { getSchoolConfig } from '@/lib/schoolConfig';
+import { getSchoolConfig, saveSchoolConfig, DEFAULT_SCHOOL_CONFIG } from '@/lib/schoolConfig';
 import { getLocalCustomHolidays, saveLocalCustomHolidays, isSchoolHoliday } from '@/lib/holidays';
 
 export default function App() {
@@ -91,14 +91,23 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState(null);
   const fileInputRef = useRef(null);
 
-  const subjects = [
-    { key: 'all', label: 'All Subjects' },
-    { key: 'maths', label: 'Maths', max: 25 },
-    { key: 'science', label: 'Science', max: 25 },
-    { key: 'english', label: 'English', max: 25 },
-    { key: 'social', label: 'Social', max: 25 },
-    { key: 'hindi', label: 'Hindi', max: 25 },
-  ];
+  // Dynamic Configured Subjects from schoolConfig
+  const configuredSubjects = useMemo(() => {
+    return schoolConfig?.subjects && schoolConfig.subjects.length > 0
+      ? schoolConfig.subjects
+      : DEFAULT_SCHOOL_CONFIG.subjects;
+  }, [schoolConfig]);
+
+  const subjects = useMemo(() => {
+    return [
+      { key: 'all', label: 'All Subjects' },
+      ...configuredSubjects
+    ];
+  }, [configuredSubjects]);
+
+  const totalConfiguredMaxMarks = useMemo(() => {
+    return configuredSubjects.reduce((sum, s) => sum + (Number(s.max) || 25), 0) || 100;
+  }, [configuredSubjects]);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -133,6 +142,44 @@ export default function App() {
     return null;
   };
 
+  // Centralized Configuration Fetch & Multi-Device Sync
+  const fetchConfig = async () => {
+    try {
+      const res = await fetch('/api/config');
+      const json = await res.json();
+      if (json.success && json.config) {
+        setSchoolConfig(json.config);
+        saveSchoolConfig(json.config);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch school config:', err);
+    }
+  };
+
+  const handleUpdateConfig = async (action, payload) => {
+    // Instant optimistic update if config is provided
+    if (action === 'save_all' && payload?.config) {
+      setSchoolConfig(payload.config);
+      saveSchoolConfig(payload.config);
+    }
+    try {
+      const res = await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ...payload })
+      });
+      const json = await res.json();
+      if (json.success && json.config) {
+        setSchoolConfig(json.config);
+        saveSchoolConfig(json.config);
+        return { success: true, config: json.config };
+      }
+      return { success: false, error: json.error, message: json.message };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  };
+
   // Initial load & live cross-device sync
   useEffect(() => {
     const savedUser = localStorage.getItem('edusnap_user');
@@ -148,20 +195,37 @@ export default function App() {
 
     fetchStudents();
     fetchHolidays();
+    fetchConfig();
 
-    // Auto-sync attendance, marks & holidays live across devices on window focus & every 10s
+    // Standard pattern: Auto-sync on window focus / tab return (throttled to 15s)
+    let lastFetch = Date.now();
     const handleFocus = () => {
-      fetchStudents();
-      fetchHolidays();
+      if (Date.now() - lastFetch > 15000) {
+        lastFetch = Date.now();
+        fetchStudents();
+        fetchHolidays();
+        fetchConfig();
+      }
     };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') handleFocus();
+    };
+
     window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // Passive safety sync every 5 minutes (300,0000ms) instead of constant 10s loop
     const interval = setInterval(() => {
+      lastFetch = Date.now();
       fetchStudents();
       fetchHolidays();
-    }, 10000);
+      fetchConfig();
+    }, 3000000);
 
     return () => {
       window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
       clearInterval(interval);
     };
   }, []);
@@ -281,7 +345,7 @@ export default function App() {
 
   const calculateStudentPercentage = (marksObj = {}) => {
     const total = calculateStudentTotal(marksObj);
-    const max = 5 * 25;
+    const max = totalConfiguredMaxMarks || 100;
     return ((total / max) * 100).toFixed(1);
   };
 
@@ -349,14 +413,19 @@ export default function App() {
 
   // Update Marks with Dynamic Class & Subject Permission Enforcement
   const updateSubjectMark = async (rollNo, subjectKey, val) => {
+    const targetSub = configuredSubjects.find(s => s.key === subjectKey);
+    const subLabel = (targetSub?.label || subjectKey).toLowerCase().trim();
+    const subMax = targetSub?.max || 25;
+
     if (!effectiveUser?.isClassTeacherOfActiveClass && effectiveUser?.role !== 'admin') {
-      const userSub = (currentUser?.subject || '').toLowerCase();
-      let match = userSub === subjectKey.toLowerCase();
+      const userSub = (currentUser?.subject || '').toLowerCase().trim();
+      let match = userSub === subjectKey.toLowerCase() || userSub === subLabel || userSub.includes(subLabel) || subLabel.includes(userSub);
       if (userSub.includes('science') && subjectKey === 'science') match = true;
       if (userSub.includes('math') && subjectKey === 'maths') match = true;
       if (userSub.includes('english') && subjectKey === 'english') match = true;
       if (userSub.includes('social') && subjectKey === 'social') match = true;
       if (userSub.includes('hindi') && subjectKey === 'hindi') match = true;
+      if (targetSub?.assignedTeacherName && currentUser?.name && targetSub.assignedTeacherName === currentUser.name) match = true;
 
       if (!match) {
         showToast(`🔒 Access restricted: In ${selectedClass}, only the ${currentUser?.subject || 'assigned subject'} teacher can edit.`);
@@ -364,7 +433,7 @@ export default function App() {
       }
     }
 
-    const num = val === '' ? '' : Math.min(25, Math.max(0, Number(val)));
+    const num = val === '' ? '' : Math.min(subMax, Math.max(0, Number(val)));
 
     updateAndPersistStudents(prev => prev.map(s => {
       if (s.rollNo === rollNo) {
@@ -512,12 +581,14 @@ export default function App() {
 
   // Export Full Marksheet CSV for Active Class
   const handleExportMarksheetCSV = () => {
-    const headers = "Roll No,Name,Class,Parent Email,Maths (25),Science (25),English (25),Social (25),Hindi (25),Total (125),Percentage %,Grade\n";
+    const subHeaders = configuredSubjects.map(s => `${s.label} (${s.max || 25})`).join(',');
+    const headers = `Roll No,Name,Class,Parent Email,${subHeaders},Total (${totalConfiguredMaxMarks}),Percentage %,Grade\n`;
     const rows = classStudents.map(s => {
       const tot = calculateStudentTotal(s.marks);
       const pct = calculateStudentPercentage(s.marks);
       const gr = getStudentGrade(pct).grade;
-      return `"${s.rollNo}","${s.name}","${selectedClass}","${s.parentEmail}",${s.marks.maths ?? 0},${s.marks.science ?? 0},${s.marks.english ?? 0},${s.marks.social ?? 0},${s.marks.hindi ?? 0},${tot},${pct}%,${gr}`;
+      const subVals = configuredSubjects.map(sub => s.marks?.[sub.key] ?? 0).join(',');
+      return `"${s.rollNo}","${s.name}","${selectedClass}","${s.parentEmail || ''}",${subVals},${tot},${pct}%,${gr}`;
     }).join("\n");
 
     const blob = new Blob([headers + rows], { type: 'text/csv;charset=utf-8;' });
@@ -533,35 +604,27 @@ export default function App() {
 
   // Download Sample Excel Template
   const handleDownloadExcelTemplate = () => {
-    const templateData = [
-      {
-        "Roll No": "01",
-        "Student Name": "Aakash Verma",
-        "Maths": 21,
-        "Science": 23,
-        "English": 20,
-        "Social": 19,
-        "Hindi": 22,
-        "Parent Email": "parent.verma@example.com",
-        "Parent Phone": "9876543201"
-      },
-      {
-        "Roll No": "02",
-        "Student Name": "Ananya Gupta",
-        "Maths": 25,
-        "Science": 25,
-        "English": 24,
-        "Social": 23,
-        "Hindi": 24,
-        "Parent Email": "parent.gupta@example.com",
-        "Parent Phone": "9876543202"
-      }
-    ];
+    const sampleRecord1 = {
+      "Roll No": "01",
+      "Student Name": "Aakash Verma",
+      "Parent Email": "parent.verma@example.com",
+      "Parent Phone": "9876543201"
+    };
+    const sampleRecord2 = {
+      "Roll No": "02",
+      "Student Name": "Ananya Gupta",
+      "Parent Email": "parent.gupta@example.com",
+      "Parent Phone": "9876543202"
+    };
+    configuredSubjects.forEach(s => {
+      sampleRecord1[s.label] = Math.round((s.max || 25) * 0.85);
+      sampleRecord2[s.label] = (s.max || 25);
+    });
 
-    const worksheet = XLSX.utils.json_to_sheet(templateData);
+    const worksheet = XLSX.utils.json_to_sheet([sampleRecord1, sampleRecord2]);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Marksheet_Template");
-    XLSX.writeFile(workbook, "MySchool_Marksheet_Import_Template.xlsx");
+    XLSX.writeFile(workbook, `MySchool_${(schoolConfig?.activeExam || 'Exam').replace(/\s+/g, '_')}_Template.xlsx`);
     showToast("📥 Downloaded Sample Excel Template!");
   };
 
@@ -590,22 +653,26 @@ export default function App() {
 
           // Match existing student by roll or name
           const existing = findMatchingStudent(students, { rollNo: rawRoll, name: rawName });
+          const importedMarks = { ...(existing?.marks || {}) };
+
+          configuredSubjects.forEach(sub => {
+            const val = row[sub.label] ?? row[sub.label.toLowerCase()] ?? row[sub.key] ?? row[`${sub.label} (${sub.max || 25})`];
+            if (val !== undefined && val !== '') {
+              importedMarks[sub.key] = Number(val);
+            } else if (importedMarks[sub.key] === undefined) {
+              importedMarks[sub.key] = 0;
+            }
+          });
 
           return {
             rollNo: existing ? existing.rollNo : rawRoll,
             name: existing ? existing.name : rawName,
-            className: existing?.className || 'Class 8-A',
+            className: existing?.className || selectedClass || 'Class 8-A',
             parentEmail: row['Parent Email'] || row['Email'] || existing?.parentEmail || '',
             parentPhone: String(row['Parent Phone'] || row['Phone'] || existing?.parentPhone || ''),
             attendance: existing?.attendance || 'P',
             emailed: false,
-            marks: {
-              maths: Number(row['Maths'] || row['Mathematics'] || row['maths'] || existing?.marks?.maths || 0),
-              science: Number(row['Science'] || row['science'] || existing?.marks?.science || 0),
-              english: Number(row['English'] || row['english'] || existing?.marks?.english || 0),
-              social: Number(row['Social'] || row['Social Studies'] || row['social'] || existing?.marks?.social || 0),
-              hindi: Number(row['Hindi'] || row['hindi'] || existing?.marks?.hindi || 0),
-            }
+            marks: importedMarks
           };
         });
 
@@ -638,19 +705,20 @@ export default function App() {
       const tot = calculateStudentTotal(student.marks);
       const pct = calculateStudentPercentage(student.marks);
       const gr = getStudentGrade(pct).grade;
+      const examName = schoolConfig?.activeExam || 'Unit Test 1';
 
-      subject = `Unit Test 1 Report Card - ${student.name} (${currentUser?.classTeacherOf || 'Class 8-A'})`;
-      message = `Dear Parent,\n\nPlease find the Unit Test 1 marks summary for ${student.name} (Roll No: ${student.rollNo}):\n` +
+      subject = `${examName} Report Card - ${student.name} (${currentUser?.classTeacherOf || selectedClass || 'Class 8-A'})`;
+      const marksBreakdown = configuredSubjects
+        .map(sub => `• ${sub.label}: ${student.marks?.[sub.key] ?? 0} / ${sub.max || 25}`)
+        .join('\n');
+
+      message = `Dear Parent,\n\nPlease find the ${examName} marks summary for ${student.name} (Roll No: ${student.rollNo}):\n` +
         `-----------------------------------------\n` +
-        `• Mathematics: ${student.marks?.maths ?? 0} / 25\n` +
-        `• Science: ${student.marks?.science ?? 0} / 25\n` +
-        `• English: ${student.marks?.english ?? 0} / 25\n` +
-        `• Social Studies: ${student.marks?.social ?? 0} / 25\n` +
-        `• Hindi: ${student.marks?.hindi ?? 0} / 25\n` +
+        `${marksBreakdown}\n` +
         `-----------------------------------------\n` +
-        `Total Score: ${tot} / 125 (${pct}%)\n` +
+        `Total Score: ${tot} / ${totalConfiguredMaxMarks} (${pct}%)\n` +
         `Overall Grade: ${gr}\n` +
-        `Class: ${currentUser?.classTeacherOf || 'Class 8-A'}\n\n` +
+        `Class: ${currentUser?.classTeacherOf || selectedClass || 'Class 8-A'}\n\n` +
         `Warm regards,\n${currentUser?.name || 'Class Teacher'}\n${currentUser?.school || 'MySchool'}`;
     }
 
@@ -803,6 +871,7 @@ export default function App() {
             students={classStudents}
             selectedClass={selectedClass}
             subjects={subjects}
+            activeExam={schoolConfig?.activeExam || 'Unit Test 1'}
             currentSubjectFilter={currentSubjectFilter}
             setCurrentSubjectFilter={setCurrentSubjectFilter}
             currentUser={effectiveUser}
@@ -837,6 +906,8 @@ export default function App() {
             showToast={showToast}
             customHolidays={customHolidays}
             onRefreshHolidays={(hols) => setCustomHolidays(hols)}
+            schoolConfig={schoolConfig}
+            onUpdateConfig={handleUpdateConfig}
           />
         )}
       </main>
@@ -868,6 +939,7 @@ export default function App() {
         onApplyData={handleApplyAiData}
         currentUser={effectiveUser}
         showToast={showToast}
+        subjects={subjects}
       />
 
       {/* Attendance 3-Option Export Modal */}
@@ -875,8 +947,10 @@ export default function App() {
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
         students={classStudents}
+        selectedClass={selectedClass}
         selectedDate={selectedAttendanceDate}
         attendanceHistory={attendanceHistory}
+        customHolidays={customHolidays}
         onExportToast={showToast}
       />
 
@@ -885,6 +959,7 @@ export default function App() {
         onClose={() => setSelectedStudentDetail(null)}
         student={selectedStudentDetail}
         subjects={subjects}
+        activeExam={schoolConfig?.activeExam || 'Unit Test 1'}
         onOpenEmailModal={handleOpenEmailSingle}
         getGrade={getStudentGrade}
         calculateTotal={calculateStudentTotal}

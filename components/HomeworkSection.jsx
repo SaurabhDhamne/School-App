@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getPdfBlobUrl } from '@/lib/pdfUtils';
 import { 
   BookOpen, 
@@ -86,13 +86,52 @@ export default function HomeworkSection({
   const [selectedImage, setSelectedImage] = useState(null); // For Image Lightbox
   const [selectedPdf, setSelectedPdf] = useState(null); // For PDF Viewer Modal { url, name }
   const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
+  const [pdfZoom, setPdfZoom] = useState(1);
   const [imageZoom, setImageZoom] = useState(1);
+  const touchStartDistRef = useRef(null);
+  const startZoomRef = useRef(1);
+  const lastTapRef = useRef(0);
 
-  // Convert PDF data URIs into Chromium-compatible Blob URLs
+  const handleTouchStart = (e, currentZoom) => {
+    if (e.touches && e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      touchStartDistRef.current = dist;
+      startZoomRef.current = currentZoom;
+    }
+  };
+
+  const handleTouchMove = (e, setZoom) => {
+    if (e.touches && e.touches.length === 2 && touchStartDistRef.current) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      const scale = dist / touchStartDistRef.current;
+      setZoom(Math.min(3, Math.max(0.6, Number((startZoomRef.current * scale).toFixed(2)))));
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchStartDistRef.current = null;
+  };
+
+  const handleDoubleTap = (setZoom, currentZoom) => {
+    const now = Date.now();
+    if (now - lastTapRef.current < 300) {
+      setZoom(currentZoom > 1 ? 1 : 1.8);
+    }
+    lastTapRef.current = now;
+  };
+
+  // Convert PDF data URIs into Chromium-compatible Blob URLs with automatic fallback
   useEffect(() => {
-    if (selectedPdf?.url) {
-      const bUrl = getPdfBlobUrl(selectedPdf.url);
+    if (selectedPdf) {
+      const bUrl = getPdfBlobUrl(selectedPdf.url || '');
       setPdfBlobUrl(bUrl);
+      setPdfZoom(1);
       return () => {
         if (bUrl && bUrl.startsWith('blob:')) {
           try { URL.revokeObjectURL(bUrl); } catch (e) {}
@@ -136,7 +175,7 @@ export default function HomeworkSection({
   });
   const [message, setMessage] = useState('');
   const [link, setLink] = useState('');
-  const [attachedFile, setAttachedFile] = useState(null); // { type: 'image' | 'pdf', name: '', size: '', url: '' }
+  const [attachedFiles, setAttachedFiles] = useState([]); // Array of up to 5 files: { type: 'image' | 'pdf', name: '', size: '', url: '' }
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [hasDeadline, setHasDeadline] = useState(false);
   const [deadlineDate, setDeadlineDate] = useState(() => {
@@ -147,15 +186,20 @@ export default function HomeworkSection({
 
   const subjects = ['Mathematics', 'Science', 'English', 'Social Studies', 'Hindi', 'General Notice'];
 
-  // Load from persistent backend API + localStorage fallback
+  // Load from persistent backend API + localStorage fallback (Intelligent merge)
   const fetchHomework = async () => {
     // 1. Instant cache load from localStorage
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved !== null) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          setHomeworkList(parsed);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setHomeworkList(prev => {
+            const idMap = new Map();
+            parsed.forEach(p => idMap.set(p.id, p));
+            prev.forEach(p => idMap.set(p.id, p));
+            return Array.from(idMap.values());
+          });
         }
       }
     } catch (e) {}
@@ -166,10 +210,22 @@ export default function HomeworkSection({
       const res = await fetch(`/api/homework?className=${encodeURIComponent(cls)}`);
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
-        setHomeworkList(json.data);
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(json.data));
-        } catch (e) {}
+        setHomeworkList(prev => {
+          const idMap = new Map();
+          json.data.forEach(p => idMap.set(p.id, p));
+          // Preserve recently created local posts (< 2 minutes old) to prevent any disappearing
+          prev.forEach(p => {
+            const postTime = Number(p.id?.replace(/\D/g, '')) || 0;
+            if (!idMap.has(p.id) && Date.now() - postTime < 120000) {
+              idMap.set(p.id, p);
+            }
+          });
+          const merged = Array.from(idMap.values());
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+          } catch (e) {}
+          return merged;
+        });
       }
     } catch (err) {
       console.warn('Homework API fetch error:', err);
@@ -179,13 +235,31 @@ export default function HomeworkSection({
   useEffect(() => {
     fetchHomework();
 
-    // Auto-sync when returning to tab or every 10 seconds
-    const handleFocus = () => fetchHomework();
+    // Standard pattern: Auto-sync on tab return / window focus (throttled to 15s)
+    let lastFetch = Date.now();
+    const handleFocus = () => {
+      if (Date.now() - lastFetch > 15000) {
+        lastFetch = Date.now();
+        fetchHomework();
+      }
+    };
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') handleFocus();
+    };
+
     window.addEventListener('focus', handleFocus);
-    const interval = setInterval(fetchHomework, 10000);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // Passive safety sync every 5 minutes (300,000ms) instead of constant 10s loop
+    const interval = setInterval(() => {
+      lastFetch = Date.now();
+      fetchHomework();
+    }, 300000);
 
     return () => {
       window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
       clearInterval(interval);
     };
   }, [selectedClass]);
@@ -200,55 +274,77 @@ export default function HomeworkSection({
     }
   };
 
+  // Upload handler supporting multiple files (capped to 5 total, max 30MB each)
   const handleFileUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    
-    // Check file size (limit to 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      showToast?.('⚠️ Please choose a file smaller than 10MB');
+    const rawFiles = Array.from(e.target.files || []);
+    if (!rawFiles.length) return;
+
+    if (attachedFiles.length + rawFiles.length > 5) {
+      showToast?.(`⚠️ Maximum 5 files/photos allowed per post (you currently have ${attachedFiles.length}).`);
+      e.target.value = '';
+      return;
+    }
+
+    const maxBytes = 30 * 1024 * 1024; // 30 MB per file limit
+    const oversized = rawFiles.find(f => f.size > maxBytes);
+    if (oversized) {
+      showToast?.(`⚠️ "${oversized.name}" exceeds the 30MB size limit. Max 30MB per file.`);
+      e.target.value = '';
       return;
     }
 
     setIsUploadingFile(true);
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    const newAttachments = [];
 
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
+    for (const file of rawFiles) {
+      const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
 
-      const res = await fetch('/api/homework/upload', {
-        method: 'POST',
-        body: formData
-      });
-      const data = await res.json();
-
-      if (data.success && data.url) {
-        setAttachedFile({
-          type: data.type || (isPdf ? 'pdf' : 'image'),
-          name: data.name || file.name,
-          size: data.size || formatFileSize(file.size),
-          url: data.url
+        const res = await fetch('/api/homework/upload', {
+          method: 'POST',
+          body: formData
         });
-        showToast?.('☁️ Worksheet uploaded to Supabase Storage Bucket!');
-      } else {
-        throw new Error(data.error || 'Upload failed');
+        const data = await res.json();
+
+        if (data.success && data.url) {
+          newAttachments.push({
+            type: data.type || (isPdf ? 'pdf' : 'image'),
+            name: data.name || file.name,
+            size: data.size || formatFileSize(file.size),
+            url: data.url
+          });
+        } else {
+          throw new Error('Upload failed');
+        }
+      } catch (err) {
+        // Fallback to local Data URI if server bucket is unreachable
+        await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (evt) => {
+            newAttachments.push({
+              type: isPdf ? 'pdf' : 'image',
+              name: file.name,
+              size: formatFileSize(file.size),
+              url: evt.target.result
+            });
+            resolve();
+          };
+          reader.onerror = resolve;
+          reader.readAsDataURL(file);
+        });
       }
-    } catch (err) {
-      console.warn('Bucket upload error, falling back to local file reader:', err);
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        setAttachedFile({
-          type: isPdf ? 'pdf' : 'image',
-          name: file.name,
-          size: formatFileSize(file.size),
-          url: evt.target.result
-        });
-      };
-      reader.readAsDataURL(file);
-    } finally {
-      setIsUploadingFile(false);
     }
+
+    setAttachedFiles(prev => [...prev, ...newAttachments].slice(0, 5));
+    showToast?.(`📎 Attached ${newAttachments.length} file${newAttachments.length > 1 ? 's' : ''}!`);
+    setIsUploadingFile(false);
+    e.target.value = '';
+  };
+
+  const handleRemoveAttachment = (indexToRemove) => {
+    setAttachedFiles(prev => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
   const handleCreateHomework = async (e) => {
@@ -270,22 +366,23 @@ export default function HomeworkSection({
       teacherRole: currentUser?.role || 'class_teacher',
       message: message.trim(),
       link: link.trim(),
-      attachment: attachedFile,
-      imageUrl: attachedFile?.type === 'image' ? attachedFile.url : null,
+      attachments: attachedFiles,
+      attachment: attachedFiles[0] || null,
+      imageUrl: attachedFiles.find(f => f.type === 'image')?.url || null,
       postedAt: formattedTime,
       hasDeadline,
       deadlineDate: hasDeadline ? deadlineDate : null
     };
 
     // Optimistic update
-    const updated = [newPost, ...homeworkList];
+    const updated = [newPost, ...homeworkList.filter(h => h.id !== newPost.id)];
     savePosts(updated);
     showToast?.('📢 Homework & notice posted successfully!');
     
     // Reset form & close modal immediately
     setMessage('');
     setLink('');
-    setAttachedFile(null);
+    setAttachedFiles([]);
     setHasDeadline(false);
     setIsModalOpen(false);
 
@@ -480,15 +577,18 @@ export default function HomeworkSection({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredList.map((hw) => {
-            // Determine attachment (support both new attachment object and legacy imageUrl)
-            const attachment = hw.attachment || (hw.imageUrl ? {
-              type: hw.imageUrl.startsWith('data:application/pdf') ? 'pdf' : 'image',
-              name: 'Worksheet File',
-              size: '',
-              url: hw.imageUrl
-            } : null);
+            // Support both new multi-attachment array and legacy single attachment/imageUrl
+            const allAttachments = Array.isArray(hw.attachments) && hw.attachments.length > 0
+              ? hw.attachments
+              : (hw.attachment ? [hw.attachment] : hw.imageUrl ? [{
+                  type: hw.imageUrl.startsWith('data:application/pdf') ? 'pdf' : 'image',
+                  name: 'Worksheet File',
+                  size: '',
+                  url: hw.imageUrl
+                }] : []);
 
-            const isPdf = attachment?.type === 'pdf' || attachment?.name?.toLowerCase().endsWith('.pdf') || attachment?.url?.startsWith('data:application/pdf');
+            const pdfFiles = allAttachments.filter(a => a?.type === 'pdf' || a?.name?.toLowerCase().endsWith('.pdf') || a?.url?.startsWith('data:application/pdf'));
+            const imgFiles = allAttachments.filter(a => a?.type === 'image' || (!a?.type && !a?.name?.toLowerCase().endsWith('.pdf')));
 
             return (
               <div 
@@ -528,68 +628,79 @@ export default function HomeworkSection({
                     {hw.message}
                   </p>
 
-                  {/* Attached PDF Document Card */}
-                  {attachment && isPdf && (
-                    <div className="mt-1 p-3 rounded-2xl bg-rose-50/70 border border-rose-200/80 flex items-center justify-between gap-2.5">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <div className="w-9 h-9 rounded-xl bg-rose-500 text-white flex items-center justify-center shrink-0 shadow-xs">
-                          <FileText className="w-5 h-5" />
-                        </div>
-                        <div className="min-w-0">
-                          <p className="text-xs font-bold text-slate-800 truncate">
-                            {attachment.name || 'Worksheet_Assignment.pdf'}
-                          </p>
-                          <span className="text-[10px] font-semibold text-rose-700 bg-rose-100/70 px-1.5 py-0.5 rounded">
-                            {attachment.size || 'PDF Document'}
-                          </span>
-                        </div>
-                      </div>
+                  {/* Attached PDF Worksheets (Support multiple) */}
+                  {pdfFiles.length > 0 && (
+                    <div className="flex flex-col gap-1.5 mt-0.5">
+                      {pdfFiles.map((pdf, pIdx) => (
+                        <div key={pIdx} className="p-2.5 rounded-2xl bg-rose-50/70 border border-rose-200/80 flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className="w-8 h-8 rounded-xl bg-rose-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                              <FileText className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-800 truncate">
+                                {pdf.name || `Worksheet_${pIdx + 1}.pdf`}
+                              </p>
+                              <span className="text-[10px] font-semibold text-rose-700 bg-rose-100/70 px-1.5 py-0.2 rounded">
+                                {pdf.size || 'PDF Document'}
+                              </span>
+                            </div>
+                          </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {attachment.url && (
-                          <button
-                            type="button"
-                            onClick={() => setSelectedPdf({ url: attachment.url, name: attachment.name || 'Worksheet.pdf' })}
-                            className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-rose-100/60 border border-rose-200 text-rose-800 font-bold text-[11px] flex items-center gap-1 shadow-xs transition-all"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>View</span>
-                          </button>
-                        )}
+                          <div className="flex items-center gap-1 shrink-0">
+                            {pdf.url && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedPdf({ url: pdf.url, name: pdf.name || 'Worksheet.pdf' })}
+                                className="px-2 py-1 rounded-xl bg-white hover:bg-rose-100/60 border border-rose-200 text-rose-800 font-bold text-[11px] flex items-center gap-1 shadow-xs transition-all"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>View</span>
+                              </button>
+                            )}
 
-                        {attachment.url && (
-                          <a
-                            href={attachment.url}
-                            download={attachment.name || 'Worksheet.pdf'}
-                            className="p-1.5 rounded-xl bg-white hover:bg-rose-100/60 border border-rose-200 text-rose-800 shadow-xs transition-all"
-                            title="Download PDF"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                          </a>
-                        )}
-                      </div>
+                            {pdf.url && (
+                              <a
+                                href={pdf.url}
+                                download={pdf.name || 'Worksheet.pdf'}
+                                className="p-1 rounded-xl bg-white hover:bg-rose-100/60 border border-rose-200 text-rose-800 shadow-xs transition-all"
+                                title="Download PDF"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
 
-                  {/* Attached Worksheet Photo (Interactive Lightbox Viewer) */}
-                  {attachment && !isPdf && attachment.url && (
-                    <div 
-                      onClick={() => {
-                        setSelectedImage(attachment.url);
-                        setImageZoom(1);
-                      }}
-                      className="relative mt-1 rounded-xl overflow-hidden border border-slate-200 bg-slate-950 max-h-40 flex items-center justify-center cursor-pointer group/img"
-                      title="Click to view full image"
-                    >
-                      <img 
-                        src={attachment.url} 
-                        alt="Worksheet Attachment" 
-                        className="object-cover w-full max-h-40 group-hover/img:scale-105 transition-transform duration-200" 
-                      />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white text-xs font-bold">
-                        <Maximize2 className="w-4 h-4" />
-                        <span>Click to Enlarge</span>
-                      </div>
+                  {/* Attached Worksheet Photos (Single or Gallery Grid) */}
+                  {imgFiles.length > 0 && (
+                    <div className={`mt-1 ${imgFiles.length > 1 ? 'grid grid-cols-2 gap-1.5' : ''}`}>
+                      {imgFiles.map((img, iIdx) => (
+                        <div 
+                          key={iIdx}
+                          onClick={() => {
+                            setSelectedImage(img.url);
+                            setImageZoom(1);
+                          }}
+                          className={`relative rounded-xl overflow-hidden border border-slate-200 bg-slate-950 flex items-center justify-center cursor-pointer group/img ${
+                            imgFiles.length > 1 ? 'h-24' : 'max-h-40'
+                          }`}
+                          title="Click to view full photo"
+                        >
+                          <img 
+                            src={img.url} 
+                            alt={img.name || `Photo ${iIdx + 1}`} 
+                            className="object-cover w-full h-full group-hover/img:scale-105 transition-transform duration-200" 
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-1 text-white text-[10px] font-bold">
+                            <Maximize2 className="w-3.5 h-3.5" />
+                            <span>Enlarge</span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
 
@@ -707,52 +818,76 @@ export default function HomeworkSection({
                 />
               </div>
 
-              {/* Optional Photo or PDF Worksheet Upload */}
-              <div>
-                <label className="font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
-                  <FileText className="w-3.5 h-3.5 text-slate-400" />
-                  <span>Attach Worksheet (Photo or PDF Document)</span>
-                </label>
-                
-                {attachedFile ? (
-                  <div className="relative rounded-2xl overflow-hidden border border-slate-200 p-3 bg-slate-50 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                        attachedFile.type === 'pdf' ? 'bg-rose-500 text-white' : 'bg-indigo-600 text-white'
-                      }`}>
-                        {attachedFile.type === 'pdf' ? <FileText className="w-5 h-5" /> : <ImageIcon className="w-5 h-5" />}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-slate-800 truncate">{attachedFile.name}</p>
-                        <p className="text-[10px] text-slate-400">{attachedFile.size} • {attachedFile.type.toUpperCase()}</p>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setAttachedFile(null)}
-                      className="p-1.5 rounded-full hover:bg-slate-200 text-slate-400 hover:text-slate-600 transition-colors"
-                      title="Remove attachment"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                ) : isUploadingFile ? (
-                  <div className="flex items-center justify-center gap-2.5 p-3.5 rounded-xl border border-indigo-200 bg-indigo-50/70 text-indigo-700">
-                    <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
-                    <span className="text-xs font-bold">Uploading attachment to Supabase Bucket...</span>
-                  </div>
-                ) : (
-                  <label className="flex items-center justify-center gap-2 p-3.5 rounded-xl border border-dashed border-slate-300 hover:border-indigo-400 bg-slate-50/60 cursor-pointer text-slate-600 transition-colors">
-                    <Upload className="w-4 h-4 text-indigo-600" />
-                    <span className="text-xs font-semibold">Click to upload Worksheet Photo or PDF (Cloud Storage)</span>
-                    <input 
-                      type="file" 
-                      accept="image/*,application/pdf" 
-                      onChange={handleFileUpload} 
-                      className="hidden" 
-                    />
+              {/* Optional Photo or PDF Worksheet Upload (Max 5 files, up to 30MB each) */}
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <label className="font-semibold text-slate-700 flex items-center gap-1.5 text-xs">
+                    <FileText className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Attach Worksheets & Photos</span>
                   </label>
+                  <span className="text-[10px] font-bold text-slate-400">
+                    {attachedFiles.length}/5 files (Max 30MB each)
+                  </span>
+                </div>
+                
+                {/* List of Attached Files */}
+                {attachedFiles.length > 0 && (
+                  <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto pr-0.5">
+                    {attachedFiles.map((file, idx) => (
+                      <div key={idx} className="rounded-2xl border border-slate-200 p-2.5 bg-slate-50 flex items-center justify-between gap-2.5 shadow-xs">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                            file.type === 'pdf' ? 'bg-rose-500 text-white' : 'bg-indigo-600 text-white'
+                          }`}>
+                            {file.type === 'pdf' ? <FileText className="w-4 h-4" /> : <ImageIcon className="w-4 h-4" />}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-slate-800 truncate">{file.name}</p>
+                            <p className="text-[10px] text-slate-400 font-semibold">{file.size} • {file.type.toUpperCase()}</p>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveAttachment(idx)}
+                          className="p-1.5 rounded-lg hover:bg-rose-100/70 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                          title="Remove this file"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Upload Trigger (if under 5 limit) */}
+                {attachedFiles.length < 5 ? (
+                  isUploadingFile ? (
+                    <div className="flex items-center justify-center gap-2.5 p-3.5 rounded-2xl border border-indigo-200 bg-indigo-50/70 text-indigo-700">
+                      <RefreshCw className="w-4 h-4 animate-spin text-indigo-600" />
+                      <span className="text-xs font-bold">Uploading attachment to cloud storage...</span>
+                    </div>
+                  ) : (
+                    <label className="flex items-center justify-center gap-2 p-3.5 rounded-2xl border border-dashed border-slate-300 hover:border-indigo-400 bg-slate-50/60 cursor-pointer text-slate-600 transition-colors">
+                      <Upload className="w-4 h-4 text-indigo-600" />
+                      <span className="text-xs font-semibold">
+                        {attachedFiles.length === 0 
+                          ? 'Click to upload Photos or PDF Worksheets (Max 5, up to 30MB each)' 
+                          : `+ Add more files (${5 - attachedFiles.length} slots left)`}
+                      </span>
+                      <input 
+                        type="file" 
+                        multiple
+                        accept="image/*,application/pdf" 
+                        onChange={handleFileUpload} 
+                        className="hidden" 
+                      />
+                    </label>
+                  )
+                ) : (
+                  <p className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl text-center">
+                    ✓ Maximum 5 attachments added for this homework post.
+                  </p>
                 )}
               </div>
 
@@ -863,21 +998,29 @@ export default function HomeworkSection({
             </div>
           </div>
 
-          {/* Full Image Display Container */}
+          {/* Full Image Display Container with Touch Pinch & Zoom */}
           <div 
-            className="relative max-w-4xl max-h-[82vh] overflow-auto flex items-center justify-center p-2 rounded-2xl bg-black/40 border border-white/10"
+            className="relative max-w-4xl max-h-[82vh] overflow-auto flex items-center justify-center p-2 rounded-2xl bg-black/40 border border-white/10 touch-pan-x touch-pan-y"
             onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => handleTouchStart(e, imageZoom)}
+            onTouchMove={(e) => handleTouchMove(e, setImageZoom)}
+            onTouchEnd={handleTouchEnd}
+            onDoubleClick={() => handleDoubleTap(setImageZoom, imageZoom)}
           >
             <img
               src={selectedImage}
               alt="Full Worksheet"
-              style={{ transform: `scale(${imageZoom})`, transformOrigin: 'center center' }}
-              className="max-h-[78vh] max-w-full object-contain rounded-lg transition-transform duration-150"
+              style={{ 
+                transform: `scale(${imageZoom})`, 
+                transformOrigin: 'center center',
+                transition: touchStartDistRef.current ? 'none' : 'transform 0.15s ease-out' 
+              }}
+              className="max-h-[78vh] max-w-full object-contain rounded-lg select-none"
             />
           </div>
 
           <p className="text-[11px] text-slate-400 mt-2">
-            Click anywhere outside the picture or press &times; to exit viewer.
+            Pinch with 2 fingers to zoom • Click anywhere outside or press &times; to exit.
           </p>
         </div>
       )}
@@ -907,6 +1050,34 @@ export default function HomeworkSection({
               </div>
 
               <div className="flex items-center gap-2">
+                {/* Zoom In/Out controls */}
+                <div className="flex items-center bg-white border border-slate-200 rounded-xl p-0.5 shadow-2xs">
+                  <button
+                    type="button"
+                    onClick={() => setPdfZoom(z => Math.max(0.6, Number((z - 0.2).toFixed(1))))}
+                    className="w-7 h-7 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-600 cursor-pointer"
+                    title="Zoom Out"
+                  >
+                    <ZoomOut className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPdfZoom(1)}
+                    className="px-1.5 text-[11px] font-bold text-slate-700 hover:text-indigo-600 cursor-pointer"
+                    title="Reset Zoom to 100%"
+                  >
+                    {Math.round(pdfZoom * 100)}%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPdfZoom(z => Math.min(2.5, Number((z + 0.2).toFixed(1))))}
+                    className="w-7 h-7 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-600 cursor-pointer"
+                    title="Zoom In"
+                  >
+                    <ZoomIn className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -917,7 +1088,7 @@ export default function HomeworkSection({
                   title="Open in Full Browser PDF Viewer"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">Open in New Tab</span>
+                  <span className="hidden sm:inline">Open in Tab</span>
                 </button>
 
                 <a
@@ -940,19 +1111,33 @@ export default function HomeworkSection({
               </div>
             </div>
 
-            {/* Embedded Native PDF Viewer with Fallback */}
-            <div className="flex-1 w-full bg-slate-100 p-2 sm:p-4 min-h-[60vh] max-h-[78vh] flex flex-col items-center justify-center">
-              {pdfBlobUrl ? (
-                <object
-                  data={pdfBlobUrl}
-                  type="application/pdf"
-                  className="w-full h-full min-h-[60vh] rounded-xl border border-slate-200 bg-white"
-                >
-                  <iframe
-                    src={pdfBlobUrl}
-                    className="w-full h-full min-h-[60vh] rounded-xl border border-slate-200 bg-white"
-                    title="PDF Worksheet Preview"
-                  />
+            {/* Embedded Native PDF Viewer with Touch Pinch & Zoom */}
+            <div 
+              className="flex-1 w-full bg-slate-100 p-2 sm:p-4 min-h-[60vh] max-h-[78vh] overflow-auto flex flex-col items-center justify-center touch-pan-x touch-pan-y"
+              onTouchStart={(e) => handleTouchStart(e, pdfZoom)}
+              onTouchMove={(e) => handleTouchMove(e, setPdfZoom)}
+              onTouchEnd={handleTouchEnd}
+              onDoubleClick={() => handleDoubleTap(setPdfZoom, pdfZoom)}
+            >
+              <div
+                style={{ 
+                  transform: `scale(${pdfZoom})`, 
+                  transformOrigin: 'top center',
+                  transition: touchStartDistRef.current ? 'none' : 'transform 0.15s ease-out' 
+                }}
+                className="w-full h-full min-h-[60vh] flex flex-col items-center justify-center"
+              >
+                {pdfBlobUrl ? (
+                  <object
+                    data={pdfBlobUrl}
+                    type="application/pdf"
+                    className="w-full h-full min-h-[60vh] rounded-xl border border-slate-200 bg-white shadow-sm"
+                  >
+                    <iframe
+                      src={pdfBlobUrl}
+                      className="w-full h-full min-h-[60vh] rounded-xl border border-slate-200 bg-white"
+                      title="PDF Worksheet Preview"
+                    />
                   {/* Graceful Fallback if browser/device cannot display embedded PDF */}
                   <div className="flex flex-col items-center justify-center p-8 text-center bg-white rounded-xl h-full w-full">
                     <FileText className="w-14 h-14 text-rose-500 mb-3" />
@@ -985,6 +1170,7 @@ export default function HomeworkSection({
                   <p className="text-xs font-medium">Preparing PDF preview...</p>
                 </div>
               )}
+              </div>
             </div>
           </div>
         </div>

@@ -19,7 +19,8 @@ import {
 export default function MarksheetTab({
   students,
   selectedClass = 'Class 8-A',
-  subjects,
+  subjects = [],
+  activeExam = 'Unit Test 1',
   currentSubjectFilter,
   setCurrentSubjectFilter,
   currentUser,
@@ -37,6 +38,9 @@ export default function MarksheetTab({
 }) {
   const [searchQuery, setSearchQuery] = useState('');
 
+  const activeSubjects = (subjects || []).filter(s => s.key !== 'all');
+  const totalMaxMarks = activeSubjects.reduce((sum, s) => sum + (Number(s.max) || 25), 0) || 100;
+
   const filteredStudents = students.filter(s => 
     s.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
     s.rollNo.includes(searchQuery)
@@ -50,13 +54,13 @@ export default function MarksheetTab({
     if (currentUser.role === 'admin' || currentUser.isClassTeacherOfActiveClass) return true;
     if (currentUser.role === 'class_teacher' && (!currentUser.classTeacherOf || currentUser.classTeacherOf === selectedClass)) return true;
     
-    const userSub = (currentUser.subject || '').toLowerCase();
-    if (userSub.includes('math') && subjectKey === 'maths') return true;
-    if (userSub.includes('science') && subjectKey === 'science') return true;
-    if (userSub.includes('english') && subjectKey === 'english') return true;
-    if (userSub.includes('social') && subjectKey === 'social') return true;
-    if (userSub.includes('hindi') && subjectKey === 'hindi') return true;
-    return userSub === subjectKey.toLowerCase();
+    const userSub = (currentUser.subject || '').toLowerCase().trim();
+    const targetSub = activeSubjects.find(s => s.key === subjectKey);
+    const subLabel = (targetSub?.label || subjectKey).toLowerCase().trim();
+
+    if (userSub && (userSub === subLabel || userSub.includes(subLabel) || subLabel.includes(userSub))) return true;
+    if (targetSub?.assignedTeacherName && currentUser?.name && targetSub.assignedTeacherName === currentUser.name) return true;
+    return false;
   };
 
   return (
@@ -67,8 +71,8 @@ export default function MarksheetTab({
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-black text-slate-900">Academic Marksheet & Gradebook</h2>
-            <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-              Unit Test 1 (Max 25/sub)
+            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+              {activeExam} (Max: {totalMaxMarks})
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -169,32 +173,15 @@ export default function MarksheetTab({
             <thead>
               <tr className="bg-slate-50/80 border-b border-slate-200/80 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                 <th className="py-4 px-4 sm:px-6">Roll & Name</th>
-                {(currentSubjectFilter === 'all' || currentSubjectFilter === 'maths') && (
-                  <th className="py-4 px-3 text-center">
-                    Maths {canEditSubject('maths') ? '(25)' : '🔒'}
-                  </th>
-                )}
-                {(currentSubjectFilter === 'all' || currentSubjectFilter === 'science') && (
-                  <th className="py-4 px-3 text-center">
-                    Science {canEditSubject('science') ? '(25)' : '🔒'}
-                  </th>
-                )}
-                {(currentSubjectFilter === 'all' || currentSubjectFilter === 'english') && (
-                  <th className="py-4 px-3 text-center">
-                    English {canEditSubject('english') ? '(25)' : '🔒'}
-                  </th>
-                )}
-                {(currentSubjectFilter === 'all' || currentSubjectFilter === 'social') && (
-                  <th className="py-4 px-3 text-center">
-                    Social {canEditSubject('social') ? '(25)' : '🔒'}
-                  </th>
-                )}
-                {(currentSubjectFilter === 'all' || currentSubjectFilter === 'hindi') && (
-                  <th className="py-4 px-3 text-center">
-                    Hindi {canEditSubject('hindi') ? '(25)' : '🔒'}
-                  </th>
-                )}
-                <th className="py-4 px-3 text-center">Total (125)</th>
+                {activeSubjects
+                  .filter(sub => currentSubjectFilter === 'all' || currentSubjectFilter === sub.key)
+                  .map(sub => (
+                    <th key={sub.key} className="py-4 px-3 text-center whitespace-nowrap">
+                      {sub.label} {canEditSubject(sub.key) ? `(${sub.max || 25})` : '🔒'}
+                    </th>
+                  ))
+                }
+                <th className="py-4 px-3 text-center whitespace-nowrap">Total ({totalMaxMarks})</th>
                 <th className="py-4 px-3 text-center">%</th>
                 <th className="py-4 px-3 text-center">Grade</th>
                 <th className="py-4 px-4 text-right">Actions</th>
@@ -229,120 +216,36 @@ export default function MarksheetTab({
                       </div>
                     </td>
 
-                    {/* Maths */}
-                    {(currentSubjectFilter === 'all' || currentSubjectFilter === 'maths') && (
-                      <td className="py-3 px-3 text-center">
-                        {canEditSubject('maths') ? (
-                          <input
-                            type="number"
-                            min="0"
-                            max="25"
-                            value={st.marks?.maths ?? ''}
-                            onChange={(e) => onUpdateMark(st.rollNo, 'maths', e.target.value)}
-                            className="w-14 text-center font-mono font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-lg py-1 focus:bg-white focus:border-indigo-500 focus:outline-none"
-                          />
-                        ) : (
-                          <span 
-                            className="inline-block w-14 text-center font-mono text-slate-400 bg-slate-100/70 py-1 rounded-lg border border-slate-200/50 cursor-not-allowed"
-                            title="Locked: Only Maths or Class Teacher can edit"
-                          >
-                            {st.marks?.maths ?? 0}
-                          </span>
-                        )}
-                      </td>
-                    )}
-
-                    {/* Science */}
-                    {(currentSubjectFilter === 'all' || currentSubjectFilter === 'science') && (
-                      <td className="py-3 px-3 text-center">
-                        {canEditSubject('science') ? (
-                          <input
-                            type="number"
-                            min="0"
-                            max="25"
-                            value={st.marks?.science ?? ''}
-                            onChange={(e) => onUpdateMark(st.rollNo, 'science', e.target.value)}
-                            className="w-14 text-center font-mono font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-lg py-1 focus:bg-white focus:border-indigo-500 focus:outline-none"
-                          />
-                        ) : (
-                          <span 
-                            className="inline-block w-14 text-center font-mono text-slate-400 bg-slate-100/70 py-1 rounded-lg border border-slate-200/50 cursor-not-allowed"
-                            title="Locked: Only Science or Class Teacher can edit"
-                          >
-                            {st.marks?.science ?? 0}
-                          </span>
-                        )}
-                      </td>
-                    )}
-
-                    {/* English */}
-                    {(currentSubjectFilter === 'all' || currentSubjectFilter === 'english') && (
-                      <td className="py-3 px-3 text-center">
-                        {canEditSubject('english') ? (
-                          <input
-                            type="number"
-                            min="0"
-                            max="25"
-                            value={st.marks?.english ?? ''}
-                            onChange={(e) => onUpdateMark(st.rollNo, 'english', e.target.value)}
-                            className="w-14 text-center font-mono font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-lg py-1 focus:bg-white focus:border-indigo-500 focus:outline-none"
-                          />
-                        ) : (
-                          <span 
-                            className="inline-block w-14 text-center font-mono text-slate-400 bg-slate-100/70 py-1 rounded-lg border border-slate-200/50 cursor-not-allowed"
-                            title="Locked: Only English or Class Teacher can edit"
-                          >
-                            {st.marks?.english ?? 0}
-                          </span>
-                        )}
-                      </td>
-                    )}
-
-                    {/* Social */}
-                    {(currentSubjectFilter === 'all' || currentSubjectFilter === 'social') && (
-                      <td className="py-3 px-3 text-center">
-                        {canEditSubject('social') ? (
-                          <input
-                            type="number"
-                            min="0"
-                            max="25"
-                            value={st.marks?.social ?? ''}
-                            onChange={(e) => onUpdateMark(st.rollNo, 'social', e.target.value)}
-                            className="w-14 text-center font-mono font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-lg py-1 focus:bg-white focus:border-indigo-500 focus:outline-none"
-                          />
-                        ) : (
-                          <span 
-                            className="inline-block w-14 text-center font-mono text-slate-400 bg-slate-100/70 py-1 rounded-lg border border-slate-200/50 cursor-not-allowed"
-                            title="Locked: Only Social Studies or Class Teacher can edit"
-                          >
-                            {st.marks?.social ?? 0}
-                          </span>
-                        )}
-                      </td>
-                    )}
-
-                    {/* Hindi */}
-                    {(currentSubjectFilter === 'all' || currentSubjectFilter === 'hindi') && (
-                      <td className="py-3 px-3 text-center">
-                        {canEditSubject('hindi') ? (
-                          <input
-                            type="number"
-                            min="0"
-                            max="25"
-                            value={st.marks?.hindi ?? ''}
-                            onChange={(e) => onUpdateMark(st.rollNo, 'hindi', e.target.value)}
-                            className="w-14 text-center font-mono font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-lg py-1 focus:bg-white focus:border-indigo-500 focus:outline-none"
-                          />
-                        ) : (
-                          <span 
-                            className="inline-block w-14 text-center font-mono text-slate-400 bg-slate-100/70 py-1 rounded-lg border border-slate-200/50 cursor-not-allowed"
-                            title="Locked: Only Hindi or Class Teacher can edit"
-                          >
-                            {st.marks?.hindi ?? 0}
-                          </span>
-                        )}
-                      </td>
-                    )}
+                    {/* Dynamic Curriculum Subjects */}
+                    {activeSubjects
+                      .filter(sub => currentSubjectFilter === 'all' || currentSubjectFilter === sub.key)
+                      .map(sub => {
+                        const isEditable = canEditSubject(sub.key);
+                        const scoreVal = st.marks?.[sub.key] ?? '';
+                        return (
+                          <td key={sub.key} className="py-3 px-3 text-center">
+                            {isEditable ? (
+                              <input
+                                type="number"
+                                min="0"
+                                max={sub.max || 25}
+                                value={scoreVal}
+                                onChange={(e) => onUpdateMark(st.rollNo, sub.key, e.target.value)}
+                                className="w-14 text-center font-mono font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-lg py-1 focus:bg-white focus:border-indigo-500 focus:outline-none"
+                                placeholder="—"
+                              />
+                            ) : (
+                              <span 
+                                className="inline-block w-14 text-center font-mono text-slate-400 bg-slate-100/70 py-1 rounded-lg border border-slate-200/50 cursor-not-allowed"
+                                title={`Locked: Only ${sub.label} or Class Teacher can edit`}
+                              >
+                                {scoreVal !== '' ? scoreVal : 0}
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })
+                    }
 
                     {/* Total */}
                     <td className="py-3 px-3 text-center font-mono font-bold text-slate-800">

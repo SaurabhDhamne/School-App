@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
 import { getSharedStudents } from '@/lib/studentsStore';
 
+const withTimeout = (promise, ms = 1000) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), ms))
+  ]);
+
 function getDefaultPassword(name = '') {
   const clean = name.replace(/^(mrs\.|mr\.|dr\.|ms\.|prof\.)\s+/i, '').trim();
   const firstName = clean.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -54,17 +60,20 @@ let fallbackProfiles = [
 
 export async function GET(request) {
   try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('id, name, email, role, class_name, subject, school')
-      .neq('role', 'admin')
-      .order('name', { ascending: true });
+    const { data, error } = await withTimeout(
+      supabase
+        .from('profiles')
+        .select('id, name, email, role, class_name, subject, school')
+        .neq('role', 'admin')
+        .order('name', { ascending: true }),
+      1000
+    );
 
     if (!error && Array.isArray(data)) {
       return NextResponse.json({ success: true, teachers: data });
     }
   } catch (err) {
-    console.warn('Supabase fetch profiles error:', err);
+    console.warn('Supabase fetch profiles timed out or failed, using local fallback:', err.message);
   }
 
   const teachers = fallbackProfiles.filter(p => p.role !== 'admin');
@@ -134,11 +143,14 @@ export async function POST(request) {
     // 1. Get Teachers List for Dropdown
     if (action === 'get_teachers') {
       try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('id, name, email, role, class_name, subject, school')
-          .neq('role', 'admin')
-          .order('name', { ascending: true });
+        const { data, error } = await withTimeout(
+          supabase
+            .from('profiles')
+            .select('id, name, email, role, class_name, subject, school')
+            .neq('role', 'admin')
+            .order('name', { ascending: true }),
+          1000
+        );
 
         if (!error && Array.isArray(data)) {
           return NextResponse.json({ success: true, teachers: data });
@@ -151,10 +163,13 @@ export async function POST(request) {
     // 1.5 Get Students List for Parent Portal dropdown
     if (action === 'get_parent_students') {
       try {
-        const { data, error } = await supabase
-          .from('students')
-          .select('id, roll_no, name, class_name, parent_email, parent_phone')
-          .order('roll_no', { ascending: true });
+        const { data, error } = await withTimeout(
+          supabase
+            .from('students')
+            .select('id, roll_no, name, class_name, parent_email, parent_phone')
+            .order('roll_no', { ascending: true }),
+          1000
+        );
 
         if (!error && Array.isArray(data)) {
           const formatted = data.map(s => ({

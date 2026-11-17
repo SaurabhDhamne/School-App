@@ -33,20 +33,11 @@ export default function DashboardTab({
   const absentCount = students.filter(s => s.attendance === 'A').length;
   const attendanceRate = totalStudents > 0 ? ((presentCount / totalStudents) * 100).toFixed(0) : 0;
 
-  // Calculate overall class average
-  const classAvg = totalStudents > 0 
-    ? (students.reduce((acc, s) => acc + Number(calculatePercentage(s.marks)), 0) / totalStudents).toFixed(1)
-    : 0;
-
-  // Top performers
-  const sortedStudents = [...students].sort((a, b) => {
-    return Number(calculatePercentage(b.marks)) - Number(calculatePercentage(a.marks));
-  });
-  const topStudents = sortedStudents.slice(0, 3);
-  const needHelpStudents = sortedStudents.filter(s => Number(calculatePercentage(s.marks)) < 60);
+  // Students needing academic follow-up (<60%)
+  const needHelpStudents = students.filter(s => Number(calculatePercentage(s.marks)) < 60);
 
   return (
-    <div className="flex flex-col gap-6 max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <div className="flex flex-col gap-5 sm:gap-6 max-w-7xl mx-auto px-3.5 sm:px-6 py-4 sm:py-6">
       
       {/* Welcome Banner */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#171340] via-indigo-900 to-indigo-800 p-6 sm:p-8 text-white shadow-xl shadow-indigo-950/10">
@@ -80,22 +71,22 @@ export default function DashboardTab({
         <div className="absolute -right-12 -bottom-12 w-64 h-64 rounded-full bg-indigo-500/20 blur-3xl pointer-events-none" />
       </div>
 
-      {/* Metrics Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col gap-2">
+      {/* Metrics Row: Clean, uncrowded 2-card overview */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-5">
+        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col gap-1.5 sm:gap-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-400">TOTAL STUDENTS</span>
+            <span className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Total Students</span>
             <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
               <Users className="w-4 h-4" />
             </div>
           </div>
           <p className="text-2xl sm:text-3xl font-black text-slate-800">{totalStudents}</p>
-          <span className="text-[11px] font-semibold text-slate-400">Enrolled in {selectedClass}</span>
+          <span className="text-[10px] sm:text-[11px] font-semibold text-slate-400">Enrolled in {selectedClass}</span>
         </div>
 
-        <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col gap-2">
+        <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col gap-1.5 sm:gap-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-400">PRESENT TODAY</span>
+            <span className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider">Present Today</span>
             <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
               <UserCheck className="w-4 h-4" />
             </div>
@@ -104,34 +95,7 @@ export default function DashboardTab({
             <p className="text-2xl sm:text-3xl font-black text-emerald-600">{presentCount}</p>
             <span className="text-xs font-bold text-slate-400">({attendanceRate}%)</span>
           </div>
-          <span className="text-[11px] font-semibold text-slate-400">{absentCount} absentees today</span>
-        </div>
-
-        <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-400">CLASS AVERAGE</span>
-            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
-              <BarChart2 className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="flex items-baseline gap-2">
-            <p className="text-2xl sm:text-3xl font-black text-indigo-600">{classAvg}%</p>
-            <span className="text-xs font-bold text-emerald-600">Unit Test 1</span>
-          </div>
-          <span className="text-[11px] font-semibold text-slate-400">5 core subjects combined</span>
-        </div>
-
-        <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-400">TOP PERFORMERS</span>
-            <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
-              <Award className="w-4 h-4" />
-            </div>
-          </div>
-          <p className="text-2xl sm:text-3xl font-black text-amber-600">
-            {students.filter(s => Number(calculatePercentage(s.marks)) >= 90).length}
-          </p>
-          <span className="text-[11px] font-semibold text-slate-400">Scored A+ (&gt;90%)</span>
+          <span className="text-[10px] sm:text-[11px] font-semibold text-slate-400">{absentCount} absentees today</span>
         </div>
       </div>
 
@@ -199,92 +163,44 @@ export default function DashboardTab({
         onNavigateToHomework={() => onNavigate('homework')}
       />
 
-      {/* Bottom Insights: Top Students & Attention Needed */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
-        {/* Top Performers */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col gap-4">
+      {/* Students Needing Support: Only shown if any students have score <60% */}
+      {needHelpStudents.length > 0 && (
+        <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col gap-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-              <Award className="w-4 h-4 text-amber-500" />
-              <span>Top Academic Performers</span>
+              <TrendingUp className="w-4 h-4 text-rose-500" />
+              <span>Academic Follow-up Needed (&lt;60% Score)</span>
             </h3>
-            <span className="text-xs font-semibold text-slate-400">{selectedClass}</span>
+            <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+              {needHelpStudents.length} Students
+            </span>
           </div>
 
-          <div className="flex flex-col gap-2.5">
-            {topStudents.length === 0 ? (
-              <div className="py-8 text-center text-slate-400 text-xs">
-                No students enrolled in {selectedClass} yet.
-              </div>
-            ) : (
-              topStudents.map((st, idx) => {
-                const pct = calculatePercentage(st.marks);
-                const gr = getGrade(pct);
-                return (
-                  <div key={st.rollNo} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
-                    <div className="flex items-center gap-3">
-                      <span className="w-6 h-6 rounded-full bg-amber-100 text-amber-700 font-bold text-xs flex items-center justify-center">
-                        #{idx + 1}
-                      </span>
-                      <div>
-                        <p className="text-xs font-bold text-slate-800">{st.name}</p>
-                        <p className="text-[10px] text-slate-400">Roll No: {st.rollNo}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-bold text-slate-700">{pct}%</span>
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${gr.color}`}>
-                        {gr.grade}
-                      </span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {needHelpStudents.map((st) => {
+              const pct = calculatePercentage(st.marks);
+              const gr = getGrade(pct);
+              return (
+                <div key={st.rollNo} className="flex items-center justify-between p-3 rounded-2xl bg-rose-50/50 border border-rose-100">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="font-mono text-xs font-bold text-slate-400 shrink-0">#{st.rollNo}</span>
+                    <div className="truncate">
+                      <p className="text-xs font-bold text-slate-800 truncate">{st.name}</p>
+                      <p className="text-[10px] text-slate-500 truncate">{st.parentEmail || st.parentPhone || 'Parent details available'}</p>
                     </div>
                   </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-
-        {/* Students Needing Support */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-indigo-500" />
-              <span>Academic Follow-up Needed</span>
-            </h3>
-            <span className="text-xs font-semibold text-slate-400">&lt;60% Score</span>
-          </div>
-
-          <div className="flex flex-col gap-2.5">
-            {needHelpStudents.length > 0 ? (
-              needHelpStudents.map((st) => {
-                const pct = calculatePercentage(st.marks);
-                const gr = getGrade(pct);
-                return (
-                  <div key={st.rollNo} className="flex items-center justify-between p-3 rounded-2xl bg-rose-50/50 border border-rose-100">
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono text-xs font-bold text-slate-400">#{st.rollNo}</span>
-                      <div>
-                        <p className="text-xs font-bold text-slate-800">{st.name}</p>
-                        <p className="text-[10px] text-slate-500">{st.parentEmail}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-rose-600">{pct}%</span>
-                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${gr.color}`}>
-                        {gr.grade}
-                      </span>
-                    </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs font-bold text-rose-600">{pct}%</span>
+                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${gr.color}`}>
+                      {gr.grade}
+                    </span>
                   </div>
-                );
-              })
-            ) : (
-              <p className="text-xs text-slate-400 italic py-4 text-center">All students are scoring above 60%!</p>
-            )}
+                </div>
+              );
+            })}
           </div>
         </div>
-
-      </div>
+      )}
 
     </div>
   );

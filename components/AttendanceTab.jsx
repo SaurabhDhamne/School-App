@@ -16,7 +16,8 @@ import {
   Sparkles,
   Palmtree,
   Coffee,
-  Users
+  Users,
+  FileSpreadsheet
 } from 'lucide-react';
 import { getHolidayInfo } from '@/lib/holidays';
 
@@ -142,11 +143,11 @@ export default function AttendanceTab({
           {/* 3-Option Attendance Download Button */}
           <button
             onClick={onOpenExportModal}
-            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-200 transition-all"
-            title="Download Weekly, Monthly, or Custom Date Attendance List"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md shadow-emerald-200 transition-all cursor-pointer"
+            title="Download Weekly (5/6 days), Monthly, or Custom Date Attendance Register in Excel"
           >
-            <Download className="w-3.5 h-3.5 text-white" />
-            <span>Export Register</span>
+            <FileSpreadsheet className="w-3.5 h-3.5 text-white" />
+            <span>Export Excel</span>
           </button>
 
           {/* Alert Absent Parents for Selected Date */}

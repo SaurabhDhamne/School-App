@@ -27,40 +27,48 @@ export async function POST(request) {
     const fileBuffer = Buffer.from(await file.arrayBuffer());
     const formattedSize = formatFileSize(file.size);
 
-    // 1. Try uploading to Supabase Storage Bucket ('homework-attachments')
+    // 1. Try uploading to Supabase Storage Bucket ('homework-attachments') with 1.5s timeout
     try {
-      // Ensure bucket exists or create public bucket if needed
-      try {
-        await supabase.storage.createBucket('homework-attachments', { public: true });
-      } catch (e) {
-        // Bucket may already exist
-      }
+      const uploadWithTimeout = Promise.race([
+        (async () => {
+          try {
+            await supabase.storage.createBucket('homework-attachments', { public: true });
+          } catch (e) {}
 
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('homework-attachments')
-        .upload(storagePath, fileBuffer, {
-          contentType: file.type || (isPdf ? 'application/pdf' : 'image/jpeg'),
-          upsert: true
-        });
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('homework-attachments')
+            .upload(storagePath, fileBuffer, {
+              contentType: file.type || (isPdf ? 'application/pdf' : 'image/jpeg'),
+              upsert: true
+            });
 
-      if (!uploadError && uploadData) {
-        const { data: publicData } = supabase.storage
-          .from('homework-attachments')
-          .getPublicUrl(storagePath);
+          if (!uploadError && uploadData) {
+            const { data: publicData } = supabase.storage
+              .from('homework-attachments')
+              .getPublicUrl(storagePath);
 
-        if (publicData?.publicUrl) {
-          return NextResponse.json({
-            success: true,
-            storage: 'supabase_bucket',
-            url: publicData.publicUrl,
-            name: originalName,
-            size: formattedSize,
-            type
-          });
-        }
+            if (publicData?.publicUrl) {
+              return {
+                success: true,
+                storage: 'supabase_bucket',
+                url: publicData.publicUrl,
+                name: originalName,
+                size: formattedSize,
+                type
+              };
+            }
+          }
+          return null;
+        })(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Bucket upload timed out')), 1500))
+      ]);
+
+      const result = await uploadWithTimeout;
+      if (result) {
+        return NextResponse.json(result);
       }
     } catch (sbErr) {
-      console.warn('Supabase bucket upload error, falling back to base64 buffer:', sbErr.message);
+      // Supabase bucket upload timed out or failed -> fall through to immediate data URI fallback
     }
 
     // 2. Safe Fallback: base64 data URI if bucket network is unreachable

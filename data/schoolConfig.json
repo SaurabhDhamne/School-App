@@ -1,0 +1,73 @@
+{
+  "schoolName": "MySchool",
+  "schoolShortName": "MySchool",
+  "schoolTagline": "Classroom & Academic Management Portal",
+  "schoolMotto": "Excellence in Education",
+  "schoolPhone": "+91 98765 43210",
+  "schoolEmail": "contact@myschool.edu",
+  "schoolAddress": "Campus Avenue, Knowledge City",
+  "schoolLogo": null,
+  "academicYear": "2026-2027",
+  "activeExam": "Unit Test 1",
+  "exams": [
+    {
+      "id": "exam_1",
+      "name": "Unit Test 1"
+    },
+    {
+      "id": "exam_2",
+      "name": "Mid-Term Exam"
+    },
+    {
+      "id": "exam_3",
+      "name": "Unit Test 2"
+    },
+    {
+      "id": "exam_4",
+      "name": "Final Exam"
+    }
+  ],
+  "classes": [
+    "Class 8-A",
+    "Class 8-B",
+    "Class 9-A",
+    "Class 9-B",
+    "Class 10-A",
+    "Class 10-B",
+    "Class 7-A",
+    "Class 7-B"
+  ],
+  "defaultClass": "Class 8-A",
+  "subjects": [
+    {
+      "key": "maths",
+      "label": "Mathematics",
+      "max": 25,
+      "assignedTeacherName": "Mrs. Priya Sharma"
+    },
+    {
+      "key": "science",
+      "label": "Science",
+      "max": 25,
+      "assignedTeacherName": "Mr. Rajesh Patel"
+    },
+    {
+      "key": "english",
+      "label": "English",
+      "max": 25,
+      "assignedTeacherName": "Mrs. Sunita Verma"
+    },
+    {
+      "key": "social",
+      "label": "Social Studies",
+      "max": 25,
+      "assignedTeacherName": null
+    },
+    {
+      "key": "hindi",
+      "label": "Hindi",
+      "max": 25,
+      "assignedTeacherName": null
+    }
+  ]
+}
