@@ -2,69 +2,94 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
 import { 
   getSharedHomework, 
+  setSharedHomework,
   addSharedHomework, 
   deleteSharedHomework, 
   clearAllSharedHomework, 
-  resetDemoHomework 
+  resetDemoHomework,
+  INITIAL_DEFAULT_POSTS
 } from '@/lib/homeworkStore';
+import { SAMPLE_WORKSHEET_PDF } from '@/lib/pdfUtils';
 
-const withTimeout = (promise, ms = 1000) => {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error('Supabase request timed out')), ms))
-  ]);
-};
+export const dynamic = 'force-dynamic';
 
-// GET: Fetch homework posts (with optional className filter)
+// Helper to format a Supabase homework record into standard frontend shape
+function formatSupabaseRow(h) {
+  let atts = [];
+  if (Array.isArray(h.attachment?.all) && h.attachment.all.length > 0) {
+    atts = h.attachment.all;
+  } else if (Array.isArray(h.attachments) && h.attachments.length > 0) {
+    atts = h.attachments;
+  } else if (h.attachment && typeof h.attachment === 'object') {
+    atts = [h.attachment];
+  }
+
+  // Ensure PDF has a valid preview URL (fallback to worksheet PDF if url is null/empty)
+  atts = atts.map(att => {
+    if (att && att.type === 'pdf' && !att.url) {
+      return { ...att, url: SAMPLE_WORKSHEET_PDF };
+    }
+    return att;
+  });
+
+  const primaryAtt = atts[0] || (h.attachment ? {
+    ...h.attachment,
+    url: (h.attachment.type === 'pdf' && !h.attachment.url) ? SAMPLE_WORKSHEET_PDF : h.attachment.url
+  } : null);
+
+  return {
+    id: String(h.id),
+    className: h.class_name || h.className || 'Class 8-A',
+    subject: h.subject || 'General',
+    teacherName: h.teacher_name || h.teacherName || 'Teacher',
+    teacherRole: h.teacher_role || h.teacherRole || 'class_teacher',
+    message: h.message || '',
+    link: h.link || '',
+    attachments: atts,
+    attachment: primaryAtt,
+    imageUrl: h.image_url || h.imageUrl || (atts.find(a => a.type === 'image')?.url) || null,
+    postedAt: h.posted_at || h.postedAt || new Date().toLocaleString(),
+    hasDeadline: h.has_deadline !== undefined ? Boolean(h.has_deadline) : Boolean(h.hasDeadline),
+    deadlineDate: h.deadline_date || h.deadlineDate || null
+  };
+}
+
+// GET: Fetch homework posts (Supabase as primary source of truth, disk as offline backup)
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const className = searchParams.get('className');
 
-  // 1. Instantly read reliable persisted local disk records (zero latency, zero downtime)
-  const localDiskPosts = getSharedHomework(className);
-
-  // 2. Try Supabase live sync with 1s strict timeout
   try {
     let query = supabase.from('homework').select('*').order('created_at', { ascending: false });
     if (className && className !== 'all' && className !== 'All Classes') {
       query = query.or(`class_name.eq.${className},class_name.eq.All Classes,class_name.is.null`);
     }
-    const { data, error } = await withTimeout(query, 1000);
 
-    if (!error && Array.isArray(data) && data.length > 0) {
-      const formatted = data.map(h => {
-        const atts = Array.isArray(h.attachments) ? h.attachments : (h.attachment ? [h.attachment] : []);
-        return {
-          id: String(h.id),
-          className: h.class_name || h.className || 'Class 8-A',
-          subject: h.subject,
-          teacherName: h.teacher_name || h.teacherName,
-          teacherRole: h.teacher_role || h.teacherRole,
-          message: h.message,
-          link: h.link || '',
-          attachments: atts,
-          attachment: atts[0] || h.attachment || null,
-          imageUrl: h.image_url || h.imageUrl || (atts.find(a => a.type === 'image')?.url) || null,
-          postedAt: h.posted_at || h.postedAt || new Date().toLocaleString(),
-          hasDeadline: h.has_deadline !== undefined ? Boolean(h.has_deadline) : Boolean(h.hasDeadline),
-          deadlineDate: h.deadline_date || h.deadlineDate || null
-        };
+    const { data, error } = await query;
+
+    if (!error && Array.isArray(data)) {
+      const formatted = data.map(formatSupabaseRow);
+      // Keep local disk store fresh as an offline cache
+      try {
+        setSharedHomework(formatted);
+      } catch (e) {}
+
+      return NextResponse.json({ 
+        success: true, 
+        data: formatted, 
+        source: 'supabase' 
       });
+    }
 
-      // Merge Supabase with disk posts so nothing is ever dropped
-      const idMap = new Map();
-      localDiskPosts.forEach(p => idMap.set(p.id, p));
-      formatted.forEach(p => {
-        if (!idMap.has(p.id)) idMap.set(p.id, p);
-      });
-      const combined = Array.from(idMap.values());
-
-      return NextResponse.json({ success: true, data: combined, source: 'supabase_merged' });
+    if (error) {
+      console.warn('Supabase homework GET error, using disk backup:', error.message);
     }
   } catch (err) {
-    // Supabase offline or timeout -> serve local disk immediately
+    console.warn('Supabase offline or unreachable, serving disk backup:', err.message);
   }
 
+  // Graceful fallback to local disk store if Supabase is offline/unreachable
+  const localDiskPosts = getSharedHomework(className);
   return NextResponse.json({ 
     success: true, 
     data: localDiskPosts, 
@@ -78,7 +103,7 @@ export async function POST(request) {
     const body = await request.json();
     const { action } = body;
 
-    // 1. Create / Post Homework
+    // 1. CREATE HOMEWORK
     if (action === 'create' || action === 'create_homework') {
       const post = body.post || body;
       const attachmentsList = Array.isArray(post.attachments) && post.attachments.length > 0
@@ -93,8 +118,8 @@ export async function POST(request) {
         teacherRole: post.teacherRole || 'class_teacher',
         message: post.message || '',
         link: post.link || '',
-        attachments: attachmentsList.slice(0, 5), // Max 5 attachments
-        attachment: attachmentsList[0] || null, // Backward compatibility
+        attachments: attachmentsList.slice(0, 5),
+        attachment: attachmentsList[0] || null,
         imageUrl: attachmentsList.find(a => a.type === 'image')?.url || post.imageUrl || null,
         postedAt: post.postedAt || new Date().toLocaleString('en-IN', {
           day: 'numeric',
@@ -108,76 +133,120 @@ export async function POST(request) {
         deadlineDate: post.deadlineDate || null
       };
 
-      // 1.1 ALWAYS save to permanent disk store FIRST (synchronous persistence, 0 risk of loss!)
-      const updatedList = addSharedHomework(newPost);
+      // Bundle all attachments inside the attachment JSONB column
+      const attachmentPayload = attachmentsList.length > 0 
+        ? { ...(attachmentsList[0] || {}), all: attachmentsList }
+        : null;
 
-      // 1.2 Non-blocking background sync to Supabase (if available)
-      (async () => {
-        try {
-          await withTimeout(
-            supabase.from('homework').insert({
-              id: newPost.id,
-              class_name: newPost.className,
-              subject: newPost.subject,
-              teacher_name: newPost.teacherName,
-              teacher_role: newPost.teacherRole,
-              message: newPost.message,
-              link: newPost.link,
-              attachment: newPost.attachment,
-              image_url: newPost.imageUrl,
-              posted_at: newPost.postedAt,
-              has_deadline: newPost.hasDeadline,
-              deadline_date: newPost.deadlineDate
-            }),
-            1500
-          );
-        } catch (e) {
-          // Quietly ignore Supabase errors if offline/unreachable
+      const rowToInsert = {
+        id: newPost.id,
+        class_name: newPost.className,
+        subject: newPost.subject,
+        teacher_name: newPost.teacherName,
+        teacher_role: newPost.teacherRole,
+        message: newPost.message,
+        link: newPost.link,
+        attachment: attachmentPayload,
+        image_url: newPost.imageUrl,
+        posted_at: newPost.postedAt,
+        has_deadline: newPost.hasDeadline,
+        deadline_date: newPost.deadlineDate
+      };
+
+      // 1.1 Persist to Supabase (AWAITED - no silent unawaited drops!)
+      let supabaseSuccess = false;
+      try {
+        const { error: insertError } = await supabase
+          .from('homework')
+          .insert(rowToInsert);
+
+        if (insertError) {
+          console.error('Supabase homework insert failed:', insertError.message);
+        } else {
+          supabaseSuccess = true;
         }
-      })();
+      } catch (sbErr) {
+        console.error('Supabase insert network exception:', sbErr.message);
+      }
+
+      // 1.2 Always mirror to local disk backup
+      const updatedList = addSharedHomework(newPost);
 
       return NextResponse.json({ 
         success: true, 
         post: newPost, 
         data: updatedList, 
-        message: 'Homework posted successfully across all devices!' 
+        storage: supabaseSuccess ? 'supabase' : 'disk_store',
+        message: 'Homework posted successfully!' 
       });
     }
 
-    // 2. Delete Homework
+    // 2. DELETE HOMEWORK
     if (action === 'delete' || action === 'delete_homework') {
       const { id } = body;
       if (!id) {
         return NextResponse.json({ error: 'Missing homework id' }, { status: 400 });
       }
 
-      // Delete from disk immediately
+      // 2.1 Await Supabase delete
+      try {
+        const { error: delError } = await supabase
+          .from('homework')
+          .delete()
+          .eq('id', id);
+
+        if (delError) {
+          console.error('Supabase delete error:', delError.message);
+        }
+      } catch (delErr) {
+        console.error('Supabase delete exception:', delErr.message);
+      }
+
+      // 2.2 Delete from local disk backup
       const updatedList = deleteSharedHomework(id);
 
-      // Background delete from Supabase
-      (async () => {
-        try {
-          await withTimeout(supabase.from('homework').delete().eq('id', id), 1500);
-        } catch (e) {}
-      })();
-
-      return NextResponse.json({ success: true, data: updatedList, message: 'Homework removed.' });
+      return NextResponse.json({ 
+        success: true, 
+        data: updatedList, 
+        message: 'Homework removed.' 
+      });
     }
 
-    // 3. Clean Slate: Clear all homework
+    // 3. CLEAR ALL HOMEWORK
     if (action === 'clear_all') {
-      (async () => {
-        try {
-          await withTimeout(supabase.from('homework').delete().neq('id', '__never_match__'), 1500);
-        } catch (e) {}
-      })();
+      try {
+        await supabase.from('homework').delete().neq('id', '__never_match__');
+      } catch (e) {}
 
       const emptyList = clearAllSharedHomework();
       return NextResponse.json({ success: true, count: 0, data: emptyList });
     }
 
-    // 4. Restore Demo Homework
+    // 4. RESTORE DEMO HOMEWORK
     if (action === 'restore_demo') {
+      try {
+        // Clear and reinsert demo posts in Supabase
+        await supabase.from('homework').delete().neq('id', '__never_match__');
+        for (const demoPost of INITIAL_DEFAULT_POSTS) {
+          await supabase.from('homework').insert({
+            id: demoPost.id,
+            class_name: demoPost.className,
+            subject: demoPost.subject,
+            teacher_name: demoPost.teacherName,
+            teacher_role: demoPost.teacherRole,
+            message: demoPost.message,
+            link: demoPost.link,
+            attachment: demoPost.attachment ? { ...demoPost.attachment, all: [demoPost.attachment] } : null,
+            image_url: demoPost.imageUrl,
+            posted_at: demoPost.postedAt,
+            has_deadline: demoPost.hasDeadline,
+            deadline_date: demoPost.deadlineDate
+          });
+        }
+      } catch (e) {
+        console.error('Supabase restore demo error:', e.message);
+      }
+
       const demoList = resetDemoHomework();
       return NextResponse.json({ success: true, count: demoList.length, data: demoList });
     }
@@ -187,4 +256,3 @@ export async function POST(request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
-

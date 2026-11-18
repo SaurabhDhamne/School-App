@@ -212,49 +212,32 @@ export default function ParentPortalView({
     }
   }, [selectedPdf, selectedImage]);
 
-  // Load Homework Posts from live server API + cached localStorage fallback (Intelligent merge)
+  // Load Homework Posts from live server API (Supabase as authoritative truth, localStorage as instant cache)
   const fetchLiveHomework = async () => {
-    // 1. Instant local storage cache
+    // 1. Instant local storage cache on initial render
     try {
       const saved = localStorage.getItem(HW_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setHomeworkList(prev => {
-            const idMap = new Map();
-            parsed.forEach(p => idMap.set(p.id, p));
-            prev.forEach(p => idMap.set(p.id, p));
-            return Array.from(idMap.values());
-          });
+          setHomeworkList(parsed);
         }
       }
-  } catch (e) { }
+    } catch (e) { }
 
-  // 2. Fetch live from server so phone immediately receives PC posts
-  try {
-    const res = await fetch(`/api/homework?className=${encodeURIComponent(studentClass)}`);
-    const json = await res.json();
-    if (json.success && Array.isArray(json.data)) {
-      setHomeworkList(prev => {
-        const idMap = new Map();
-        json.data.forEach(p => idMap.set(p.id, p));
-        // Preserve recently posted items (< 2 mins) so they never vanish
-        prev.forEach(p => {
-          const postTime = Number(p.id?.replace(/\D/g, '')) || 0;
-          if (!idMap.has(p.id) && Date.now() - postTime < 120000) {
-            idMap.set(p.id, p);
-          }
-        });
-        const merged = Array.from(idMap.values());
+    // 2. Fetch live from server so phone immediately receives PC posts
+    try {
+      const res = await fetch(`/api/homework?className=${encodeURIComponent(studentClass)}`, { cache: 'no-store' });
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setHomeworkList(json.data);
         try {
-          localStorage.setItem(HW_STORAGE_KEY, JSON.stringify(merged));
-      } catch (e) { }
-      return merged;
-    });
-  }
+          localStorage.setItem(HW_STORAGE_KEY, JSON.stringify(json.data));
+        } catch (e) { }
+      }
     } catch (err) {
-  console.warn('Parent portal homework fetch error:', err);
-}
+      console.warn('Parent portal homework fetch error:', err);
+    }
   };
 
 useEffect(() => {

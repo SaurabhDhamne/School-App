@@ -186,46 +186,29 @@ export default function HomeworkSection({
 
   const subjects = ['Mathematics', 'Science', 'English', 'Social Studies', 'Hindi', 'General Notice'];
 
-  // Load from persistent backend API + localStorage fallback (Intelligent merge)
+  // Load from persistent backend API (Supabase as authoritative truth, localStorage as instant cache)
   const fetchHomework = async () => {
-    // 1. Instant cache load from localStorage
+    // 1. Instant cache load from localStorage on cold start
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved !== null) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setHomeworkList(prev => {
-            const idMap = new Map();
-            parsed.forEach(p => idMap.set(p.id, p));
-            prev.forEach(p => idMap.set(p.id, p));
-            return Array.from(idMap.values());
-          });
+          setHomeworkList(parsed);
         }
       }
     } catch (e) {}
 
-    // 2. Fresh live sync from server API
+    // 2. Fresh live sync from server API (authoritative source of truth)
     try {
       const cls = selectedClass || 'Class 8-A';
-      const res = await fetch(`/api/homework?className=${encodeURIComponent(cls)}`);
+      const res = await fetch(`/api/homework?className=${encodeURIComponent(cls)}`, { cache: 'no-store' });
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
-        setHomeworkList(prev => {
-          const idMap = new Map();
-          json.data.forEach(p => idMap.set(p.id, p));
-          // Preserve recently created local posts (< 2 minutes old) to prevent any disappearing
-          prev.forEach(p => {
-            const postTime = Number(p.id?.replace(/\D/g, '')) || 0;
-            if (!idMap.has(p.id) && Date.now() - postTime < 120000) {
-              idMap.set(p.id, p);
-            }
-          });
-          const merged = Array.from(idMap.values());
-          try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
-          } catch (e) {}
-          return merged;
-        });
+        setHomeworkList(json.data);
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(json.data));
+        } catch (e) {}
       }
     } catch (err) {
       console.warn('Homework API fetch error:', err);
@@ -388,12 +371,16 @@ export default function HomeworkSection({
 
     // Sync to backend database so phone and all parents receive it
     try {
-      await fetch('/api/homework', {
+      const res = await fetch('/api/homework', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'create', post: newPost })
       });
-      fetchHomework();
+      const json = await res.json();
+      if (json.success && json.post) {
+        // Reconcile state and cache with confirmed server post
+        setHomeworkList(prev => [json.post, ...prev.filter(h => h.id !== json.post.id && h.id !== newPost.id)]);
+      }
     } catch (err) {
       console.warn('Backend homework sync error:', err);
     }
