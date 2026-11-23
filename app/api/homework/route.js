@@ -11,6 +11,7 @@ import {
 } from '@/lib/homeworkStore';
 import { SAMPLE_WORKSHEET_PDF } from '@/lib/pdfUtils';
 import { logger } from '@/lib/logger';
+import { precomputeHomeworkExplanationInBackground } from '@/lib/homeworkExplainer';
 
 export const dynamic = 'force-dynamic';
 
@@ -215,6 +216,14 @@ export async function POST(request) {
 
       // 1.2 Always mirror to local disk backup
       const updatedList = addSharedHomework(newPost);
+
+      // 1.3 Asynchronously precompute AI explanation in background for all 4 languages (English, Hindi, Marathi, Gujarati)
+      // Stores directly into Supabase Cloud DB so parents get instant responses with zero Vercel load
+      try {
+        precomputeHomeworkExplanationInBackground(newPost);
+      } catch (bgErr) {
+        console.warn('[AI_PRECOMPUTE] Background AI precomputation notice:', bgErr.message);
+      }
 
       return NextResponse.json({ 
         success: true, 

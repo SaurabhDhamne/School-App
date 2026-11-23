@@ -146,6 +146,7 @@ export default function ParentPortalView({
   const [aiExplainData, setAiExplainData] = useState({}); // { [hwId]: { [lang]: data } }
   const [aiLoadingHwId, setAiLoadingHwId] = useState(null);
   const [aiActiveLangMap, setAiActiveLangMap] = useState({}); // { [hwId]: 'en' | 'hi' | ... }
+  const [aiRevealedMap, setAiRevealedMap] = useState({}); // Track initial 1.2s "AI working" animation feel per item
 
   // PWA Home Screen Install State
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -376,6 +377,117 @@ const toggleHomeworkCompleted = (hwId) => {
 });
   };
 
+// Bulletproof instant client fallback generator (guarantees summary even if offline, API busy, or 413 error)
+const generateClientSmartFallback = (hw, lang = 'en') => {
+  const message = (hw?.message || '').trim();
+  const subject = hw?.subject || 'General';
+  const teacher = hw?.teacherName || 'Teacher';
+  const hasAttachment = Boolean(hw?.attachment || (Array.isArray(hw?.attachments) && hw.attachments.length > 0) || hw?.imageUrl);
+
+  // Extract topic
+  let topic = '';
+  const onMatch = message.match(/(?:on|topic[:\s]+|chapter\s+\d+\s+on)\s+([A-Za-z0-9\s\-]+?)(?=\.|\band\b|\brefer\b|\bfor\b|\bin\b|$)/i);
+  if (onMatch && onMatch[1] && onMatch[1].trim().length > 2) {
+    topic = onMatch[1].trim();
+  } else {
+    const quoteMatch = message.match(/['"]([^'"]+)['"]/);
+    if (quoteMatch) topic = quoteMatch[1].trim();
+  }
+  if (!topic) topic = subject;
+
+  // Extract task
+  let task = '';
+  const exMatch = message.match(/(exercise\s+[0-9\.]+(?:\s*\([^\)]+\))?|chapter\s+[0-9]+|questions?\s+[0-9\s,to\-]+|worksheet\s+[0-9]+)/i);
+  if (exMatch) {
+    task = exMatch[1].trim();
+  } else {
+    task = message.length > 60 ? message.substring(0, 60) + '...' : (message || 'Complete the assigned work');
+  }
+
+  if (lang === 'hi') {
+    const summary = hasAttachment
+      ? `यह गृहकार्य '${topic}' विषय पर है। विद्यार्थियों को ${task} पूरा करना है और साथ में दी गई अभ्यास वर्कशीट का अध्ययन करके कार्य नोटबुक में हल करना है।`
+      : `यह गृहकार्य '${topic}' विषय पर है। शिक्षक (${teacher}) ने ${task} को अपनी नोटबुक में पूरा करने का निर्देश दिया है।`;
+    return {
+      contentTitle: `${topic} अभ्यास वर्कशीट`,
+      summary,
+      explanation: summary,
+      topic: topic || subject,
+      task: task || 'दिए गए प्रश्नों को हल करना',
+      resource: hasAttachment ? `${topic || subject} अभ्यास सामग्री` : 'पाठ्यपुस्तक व नोटबुक',
+      parentTip: 'सलाह: जांचें कि बच्चे ने सभी प्रश्न अपनी नोटबुक में हल किए हैं और लिखावट साफ़ है।',
+      keyPoints: [
+        `📌 विषय (Topic): ${topic || subject}`,
+        `📝 मुख्य कार्य (Task): ${task}`,
+        `💡 माता-पिता के लिए सुझाव: बच्चे से पूरा काम नोटबुक में लिखवाएं।`
+      ],
+      _source: 'smart_engine'
+    };
+  }
+
+  if (lang === 'mr') {
+    const summary = hasAttachment
+      ? `हा गृहपाठ '${topic}' या घटकावर आधारित आहे. यामध्ये ${task} सोडवायचे असून सोबत जोडलेल्या सराव वर्कशीटमधील अभ्यास वहीत पूर्ण करायचा आहे.`
+      : `हा गृहपाठ '${topic}' या घटकावर आधारित आहे. शिक्षकांनी (${teacher}) ${task} मधील अभ्यास वहीत पूर्ण करण्यास सांगितले आहे.`;
+    return {
+      contentTitle: `${topic} सराव वर्कशीट`,
+      summary,
+      explanation: summary,
+      topic: topic || subject,
+      task: task || 'दिलेले प्रश्न सोडवणे',
+      resource: hasAttachment ? `${topic || subject} सराव साहित्य` : 'पाठ्यपुस्तक व वही',
+      parentTip: 'पालकांसाठी टीप: मुलाने वहीत सर्व प्रश्नांची उत्तरे खाडाखोड न करता व्यवस्थित लिहिली आहेत का ते तपासा.',
+      keyPoints: [
+        `📌 घटक (Topic): ${topic || subject}`,
+        `📝 मुख्य काम (Task): ${task}`,
+        `💡 पालकांसाठी मार्गदर्शन: मुलाकडून पायरी-पायरीने काम पूर्ण करून घ्या.`
+      ],
+      _source: 'smart_engine'
+    };
+  }
+
+  if (lang === 'gu') {
+    const summary = hasAttachment
+      ? `આ હોમવર્ક '${topic}' પ્રકરણ પર છે. તેમાં ${task} ના પ્રશ્નો અને સાથે જોડેલ વર્કશીટમાંથી દાખલા નોટબુકમાં ગણવાના રહેશે.`
+      : `આ હોમવર્ક '${topic}' પ્રકરણ પર છે. શિક્ષકે (${teacher}) ${task} નોટબુકમાં પૂર્ણ કરવાની સૂચના આપી છે.`;
+    return {
+      contentTitle: `${topic} વર્કશીટ`,
+      summary,
+      explanation: summary,
+      topic: topic || subject,
+      task: task || 'આપેલ પ્રશ્નો ગણવા',
+      resource: hasAttachment ? `${topic || subject} અભ્યાસ સામગ્રી` : 'પાઠ્યપુસ્તક અને નોટબુક',
+      parentTip: 'વાલીઓ માટે સલાહ: ખાતરી કરો કે બાળક બધા પ્રશ્નોના જવાબો પોતાની નોટબુકમાં સ્પષ્ટ રીતે લખે.',
+      keyPoints: [
+        `📌 વિષય (Topic): ${topic || subject}`,
+        `📝 મુખ્ય કાર્ય (Task): ${task}`,
+        `💡 વાલી માર્ગદર્શન: હોમવર્ક પૂર્ણ થયા પછી નોટબુક ચકાસો.`
+      ],
+      _source: 'smart_engine'
+    };
+  }
+
+  // Default: English
+  const summary = hasAttachment
+    ? `This homework covers '${topic}'. Students are assigned to ${task}, and complete the attached practice worksheet in their subject notebook.`
+    : `This homework covers '${topic}'. The teacher (${teacher}) has assigned ${task} to be completed in the subject notebook.`;
+  return {
+    contentTitle: `${topic} Practice Worksheet`,
+    summary,
+    explanation: summary,
+    topic: topic || subject,
+    task: task || 'Complete the assigned work',
+    resource: hasAttachment ? `${topic || subject} Practice Worksheet` : 'Textbook & Notebook',
+    parentTip: 'Parent Tip: Ensure your child writes down the answers step-by-step in their subject notebook.',
+    keyPoints: [
+      `📌 Topic: ${topic || subject}`,
+      `📝 Task: ${task}`,
+      `💡 Parent Guidance: Verify completed answers in child's notebook.`
+    ],
+    _source: 'smart_engine'
+  };
+};
+
 // AI Homework Explainer & Multi-Language Translator Handler
 const handleToggleAiExplanation = async (hw, targetLang = null, forceRefresh = false) => {
   const hwId = hw.id;
@@ -392,12 +504,21 @@ const handleToggleAiExplanation = async (hw, targetLang = null, forceRefresh = f
     setAiActiveLangMap(prev => ({ ...prev, [hwId]: targetLang }));
   }
 
-  // If already cached for this hw and language, return instantly unless forcing refresh
+  // If already cached for this hw and language:
   if (!forceRefresh && aiExplainData[hwId]?.[currentLang]) {
+    // Provide a brief 1.2s "AI working" animation feel when opened for the first time
+    if (!aiRevealedMap[`${hwId}_${currentLang}`]) {
+      setAiLoadingHwId(hwId);
+      setTimeout(() => {
+        setAiRevealedMap(prev => ({ ...prev, [`${hwId}_${currentLang}`]: true }));
+        setAiLoadingHwId(null);
+      }, 1100);
+    }
     return;
   }
 
   setAiLoadingHwId(hwId);
+  setAiRevealedMap(prev => ({ ...prev, [`${hwId}_${currentLang}`]: true }));
   try {
     // Strip giant base64 data URIs from client request body to avoid HTTP 413 Payload Too Large.
     // The server hydrates the full high-res worksheet image directly from the server store using hw.id.
@@ -439,7 +560,7 @@ const handleToggleAiExplanation = async (hw, targetLang = null, forceRefresh = f
     if (json.source === 'gemini_ai' || json.success) {
       console.log('Successfully analyzed');
     } else {
-      console.log('Analysis error occurred');
+      console.log('Analysis error occurred - activating client fallback');
     }
 
     if (json.success && json.data) {
@@ -449,13 +570,32 @@ const handleToggleAiExplanation = async (hw, targetLang = null, forceRefresh = f
           ...(prev[hwId] || {}),
           [currentLang]: {
             ...json.data,
-            _source: json.source
+            _source: json.source || 'gemini_ai'
           }
+        }
+      }));
+    } else {
+      // Guaranteed fallback: display smart summary so parent/teacher never sees an empty box!
+      const fallback = generateClientSmartFallback(hw, currentLang);
+      setAiExplainData(prev => ({
+        ...prev,
+        [hwId]: {
+          ...(prev[hwId] || {}),
+          [currentLang]: fallback
         }
       }));
     }
   } catch (err) {
-    console.error('Could not fetch AI homework explanation:', err);
+    console.error('Could not fetch AI homework explanation, using client fallback:', err);
+    // Instant fallback on catch (e.g. offline, timeout, network error)
+    const fallback = generateClientSmartFallback(hw, currentLang);
+    setAiExplainData(prev => ({
+      ...prev,
+      [hwId]: {
+        ...(prev[hwId] || {}),
+        [currentLang]: fallback
+      }
+    }));
   } finally {
     setAiLoadingHwId(null);
   }
@@ -1185,10 +1325,15 @@ return (
 
                     {/* Content Body */}
                     {isLoadingThisAi ? (
-                      <div className="py-6 flex flex-col items-center justify-center gap-2 text-indigo-600">
-                        <RefreshCw className="w-5 h-5 animate-spin text-indigo-600" />
-                        <p className="text-xs font-semibold text-slate-600">
-                          Translating explanation to {AI_LANGUAGES.find(l => l.code === activeLang)?.label || 'selected language'}...
+                      <div className="py-7 flex flex-col items-center justify-center gap-2.5 text-indigo-600 animate-in fade-in duration-150">
+                        <div className="w-10 h-10 rounded-2xl bg-indigo-100 flex items-center justify-center text-indigo-600 shadow-inner">
+                          <Sparkles className="w-5 h-5 animate-spin text-indigo-600" />
+                        </div>
+                        <p className="text-xs font-bold text-slate-800">
+                          AI Study Assistant is analyzing...
+                        </p>
+                        <p className="text-[11px] text-slate-500 font-medium">
+                          Reading notice & preparing study plan in {AI_LANGUAGES.find(l => l.code === activeLang)?.label || 'selected language'}
                         </p>
                       </div>
                     ) : currentAiData ? (
