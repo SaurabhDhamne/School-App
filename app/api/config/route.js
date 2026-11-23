@@ -176,6 +176,89 @@ export async function POST(request) {
       return NextResponse.json({ success: true, config });
     }
 
+    // 7.5 Add Class
+    if (action === 'add_class') {
+      const { className } = body;
+      if (!className || !className.trim()) {
+        return NextResponse.json({ success: false, error: 'Class name is required' }, { status: 400 });
+      }
+      const trimmed = className.trim();
+      const existing = config.classes || [];
+      if (existing.includes(trimmed)) {
+        return NextResponse.json({ success: false, error: 'Class already exists' }, { status: 400 });
+      }
+      config.classes = [...existing, trimmed];
+      saveSchoolConfigToDisk(config);
+      return NextResponse.json({ success: true, config, className: trimmed });
+    }
+
+    // 7.6 Delete Class
+    if (action === 'delete_class') {
+      const { className } = body;
+      if (!className) {
+        return NextResponse.json({ success: false, error: 'Class name is required' }, { status: 400 });
+      }
+      if ((config.classes || []).length <= 1) {
+        return NextResponse.json({
+          success: false,
+          error: 'minimum_required',
+          message: 'At least one class must remain in the school.'
+        }, { status: 400 });
+      }
+      config.classes = (config.classes || []).filter(c => c !== className);
+      if (config.defaultClass === className) {
+        config.defaultClass = config.classes[0] || 'Class 8-A';
+      }
+      saveSchoolConfigToDisk(config);
+      return NextResponse.json({ success: true, config });
+    }
+
+    // 7.65 Rename Class
+    if (action === 'rename_class') {
+      const { oldName, newName } = body;
+      if (!oldName || !newName || !newName.trim()) {
+        return NextResponse.json({ success: false, error: 'Both oldName and newName are required' }, { status: 400 });
+      }
+      const trimmedOld = oldName.trim();
+      const trimmedNew = newName.trim();
+
+      if (trimmedOld.toLowerCase() !== trimmedNew.toLowerCase()) {
+        if ((config.classes || []).some(c => c.toLowerCase() === trimmedNew.toLowerCase())) {
+          return NextResponse.json({ success: false, error: 'A class with this new name already exists' }, { status: 400 });
+        }
+      }
+
+      config.classes = (config.classes || []).map(c => c === trimmedOld ? trimmedNew : c);
+      if (config.defaultClass === trimmedOld) {
+        config.defaultClass = trimmedNew;
+      }
+      if (Array.isArray(config.subjects)) {
+        config.subjects = config.subjects.map(s => {
+          if (Array.isArray(s.classes)) {
+            return {
+              ...s,
+              classes: s.classes.map(c => c === trimmedOld ? trimmedNew : c)
+            };
+          }
+          return s;
+        });
+      }
+
+      saveSchoolConfigToDisk(config);
+      return NextResponse.json({ success: true, config, oldName: trimmedOld, newName: trimmedNew });
+    }
+
+    // 7.7 Update All Classes
+    if (action === 'update_classes') {
+      const { classes } = body;
+      if (!Array.isArray(classes) || classes.length === 0) {
+        return NextResponse.json({ success: false, error: 'Classes array is required' }, { status: 400 });
+      }
+      config.classes = classes.map(c => String(c).trim()).filter(Boolean);
+      saveSchoolConfigToDisk(config);
+      return NextResponse.json({ success: true, config });
+    }
+
     // 8. General config save
     if (action === 'save_all' && body.config) {
       config = { ...config, ...body.config };

@@ -10,6 +10,7 @@ import {
   INITIAL_DEFAULT_POSTS
 } from '@/lib/homeworkStore';
 import { SAMPLE_WORKSHEET_PDF } from '@/lib/pdfUtils';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,6 +38,14 @@ function formatSupabaseRow(h) {
     url: (h.attachment.type === 'pdf' && !h.attachment.url) ? SAMPLE_WORKSHEET_PDF : h.attachment.url
   } : null);
 
+  const targetRollNos = Array.isArray(h.target_roll_nos)
+    ? h.target_roll_nos
+    : (Array.isArray(h.attachment?.targetRollNos) ? h.attachment.targetRollNos : (Array.isArray(h.targetRollNos) ? h.targetRollNos : []));
+
+  const targetStudentNames = Array.isArray(h.target_student_names)
+    ? h.target_student_names
+    : (Array.isArray(h.attachment?.targetStudentNames) ? h.attachment.targetStudentNames : (Array.isArray(h.targetStudentNames) ? h.targetStudentNames : []));
+
   return {
     id: String(h.id),
     className: h.class_name || h.className || 'Class 8-A',
@@ -45,12 +54,15 @@ function formatSupabaseRow(h) {
     teacherRole: h.teacher_role || h.teacherRole || 'class_teacher',
     message: h.message || '',
     link: h.link || '',
+    targetRollNos,
+    targetStudentNames,
     attachments: atts,
     attachment: primaryAtt,
     imageUrl: h.image_url || h.imageUrl || (atts.find(a => a.type === 'image')?.url) || null,
     postedAt: h.posted_at || h.postedAt || new Date().toLocaleString(),
     hasDeadline: h.has_deadline !== undefined ? Boolean(h.has_deadline) : Boolean(h.hasDeadline),
-    deadlineDate: h.deadline_date || h.deadlineDate || null
+    deadlineDate: h.deadline_date || h.deadlineDate || null,
+    aiExplanations: h.attachment?.aiExplanations || h.ai_explanations || h.aiExplanations || {}
   };
 }
 
@@ -58,6 +70,7 @@ function formatSupabaseRow(h) {
 export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const className = searchParams.get('className');
+  const studentRollNo = searchParams.get('studentRollNo'); // For strict server-side privacy filtering
 
   try {
     let query = supabase.from('homework').select('*').order('created_at', { ascending: false });
@@ -68,11 +81,19 @@ export async function GET(request) {
     const { data, error } = await query;
 
     if (!error && Array.isArray(data)) {
-      const formatted = data.map(formatSupabaseRow);
+      let formatted = data.map(formatSupabaseRow);
       // Keep local disk store fresh as an offline cache
       try {
         setSharedHomework(formatted);
       } catch (e) {}
+
+      // Server-side privacy filter: if studentRollNo is passed, do not leak other students' private notices
+      if (studentRollNo) {
+        formatted = formatted.filter(hw => {
+          if (!hw.targetRollNos || hw.targetRollNos.length === 0) return true;
+          return hw.targetRollNos.includes(studentRollNo);
+        });
+      }
 
       return NextResponse.json({ 
         success: true, 
@@ -89,7 +110,14 @@ export async function GET(request) {
   }
 
   // Graceful fallback to local disk store if Supabase is offline/unreachable
-  const localDiskPosts = getSharedHomework(className);
+  let localDiskPosts = getSharedHomework(className);
+  if (studentRollNo && Array.isArray(localDiskPosts)) {
+    localDiskPosts = localDiskPosts.filter(hw => {
+      if (!hw.targetRollNos || hw.targetRollNos.length === 0) return true;
+      return hw.targetRollNos.includes(studentRollNo);
+    });
+  }
+
   return NextResponse.json({ 
     success: true, 
     data: localDiskPosts, 
@@ -110,6 +138,9 @@ export async function POST(request) {
         ? post.attachments
         : (post.attachment ? [post.attachment] : []);
 
+      const targetRollNos = Array.isArray(post.targetRollNos) ? post.targetRollNos : [];
+      const targetStudentNames = Array.isArray(post.targetStudentNames) ? post.targetStudentNames : [];
+
       const newPost = {
         id: post.id || `hw_${Date.now()}`,
         className: post.className || 'Class 8-A',
@@ -118,6 +149,8 @@ export async function POST(request) {
         teacherRole: post.teacherRole || 'class_teacher',
         message: post.message || '',
         link: post.link || '',
+        targetRollNos,
+        targetStudentNames,
         attachments: attachmentsList.slice(0, 5),
         attachment: attachmentsList[0] || null,
         imageUrl: attachmentsList.find(a => a.type === 'image')?.url || post.imageUrl || null,
@@ -133,10 +166,13 @@ export async function POST(request) {
         deadlineDate: post.deadlineDate || null
       };
 
-      // Bundle all attachments inside the attachment JSONB column
-      const attachmentPayload = attachmentsList.length > 0 
-        ? { ...(attachmentsList[0] || {}), all: attachmentsList }
-        : null;
+      // Bundle attachments and target audience metadata inside JSONB attachment column
+      const attachmentPayload = {
+        ...(attachmentsList[0] || {}),
+        all: attachmentsList,
+        targetRollNos,
+        targetStudentNames
+      };
 
       const rowToInsert = {
         id: newPost.id,
@@ -162,11 +198,19 @@ export async function POST(request) {
 
         if (insertError) {
           console.error('Supabase homework insert failed:', insertError.message);
+          logger.error('SUPABASE', `Homework insert failed: ${insertError.message}`, { id: newPost.id, class: newPost.className });
         } else {
           supabaseSuccess = true;
+          logger.info('HOMEWORK', `Post saved: "${newPost.subject}" by ${newPost.teacherName}`, {
+            id: newPost.id,
+            class: newPost.className,
+            audience: targetRollNos.length > 0 ? `${targetRollNos.length} targeted students` : 'Entire Class',
+            attachments: attachmentsList.length
+          });
         }
       } catch (sbErr) {
         console.error('Supabase insert network exception:', sbErr.message);
+        logger.error('SUPABASE', `Network exception inserting homework: ${sbErr.message}`, { id: newPost.id });
       }
 
       // 1.2 Always mirror to local disk backup

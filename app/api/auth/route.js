@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabaseClient';
 import { getSharedStudents } from '@/lib/studentsStore';
+import { getStoredFaculty, saveStoredFaculty, INITIAL_FACULTY } from '@/lib/facultyStore';
 
 const withTimeout = (promise, ms = 1000) =>
   Promise.race([
@@ -14,51 +15,53 @@ function getDefaultPassword(name = '') {
   return `${firstName || 'teacher'}@123`;
 }
 
-// In-memory fallback: 1 Admin + Exactly 3 Teachers for "MySchool"
-let fallbackProfiles = [
-  {
-    id: 'admin_1',
-    name: 'School Administrator',
-    email: 'admin@myschool.com',
-    password: 'admin@123',
-    role: 'admin',
-    class_name: 'All Classes',
-    subject: 'All Subjects',
-    school: 'MySchool'
-  },
-  {
-    id: 't1',
-    name: 'Mrs. Priya Sharma',
-    email: 'priya@myschool.com',
-    password: 'priya@123',
-    role: 'class_teacher',
-    class_name: 'Class 8-A',
-    subject: 'Mathematics',
-    school: 'MySchool'
-  },
-  {
-    id: 't2',
-    name: 'Mr. Rajesh Patel',
-    email: 'rajesh@myschool.com',
-    password: 'rajesh@123',
-    role: 'subject_teacher',
-    class_name: 'Class 8-A',
-    subject: 'Science',
-    school: 'MySchool'
-  },
-  {
-    id: 't3',
-    name: 'Mrs. Sunita Verma',
-    email: 'sunita@myschool.com',
-    password: 'sunita@123',
-    role: 'subject_teacher',
-    class_name: 'Class 8-A',
-    subject: 'English',
-    school: 'MySchool'
+function formatTeacherProfile(t, fallbackTeachers = []) {
+  const fallback = Array.isArray(fallbackTeachers) 
+    ? fallbackTeachers.find(f => f.id === t.id || f.email?.toLowerCase() === t.email?.toLowerCase())
+    : null;
+
+  let ct = t.classTeacherOf || t.class_teacher_of || fallback?.classTeacherOf || null;
+  let classes = Array.isArray(t.classes) && t.classes.length > 0 
+    ? [...t.classes] 
+    : (fallback?.classes ? [...fallback.classes] : []);
+
+  if (typeof t.class_name === 'string') {
+    const ctMatch = t.class_name.match(/(.+?)\s*\(CT\)/i);
+    if (ctMatch) {
+      ct = ctMatch[1].trim();
+    }
+    const parts = t.class_name.split(',').map(c => c.replace(/\(CT\)/i, '').trim()).filter(Boolean);
+    if (parts.length > 0) {
+      classes = Array.from(new Set([...classes, ...parts]));
+    }
   }
-];
+
+  if (classes.length === 0) {
+    classes = ['Class 8-A', 'Class 8-B', 'Class 9-A', 'Class 9-B', 'Class 10-A', 'Class 10-B'];
+  }
+
+  if (t.role === 'class_teacher' && !ct) {
+    ct = fallback?.classTeacherOf || classes[0] || 'Class 8-A';
+  } else if (t.role === 'subject_teacher') {
+    ct = null;
+  }
+
+  const role = ct ? 'class_teacher' : 'subject_teacher';
+
+  return {
+    ...t,
+    role,
+    classTeacherOf: ct,
+    class_teacher_of: ct,
+    classes,
+    class_name: ct ? `${ct} (CT), ${classes.filter(c => c !== ct).join(', ')}` : classes.join(', ')
+  };
+}
 
 export async function GET(request) {
+  const storedFaculty = getStoredFaculty();
+  const teachersOnly = storedFaculty.filter(p => p.role !== 'admin');
+
   try {
     const { data, error } = await withTimeout(
       supabase
@@ -69,15 +72,16 @@ export async function GET(request) {
       1000
     );
 
-    if (!error && Array.isArray(data)) {
-      return NextResponse.json({ success: true, teachers: data });
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const formatted = data.map(t => formatTeacherProfile(t, teachersOnly));
+      return NextResponse.json({ success: true, teachers: formatted });
     }
   } catch (err) {
     console.warn('Supabase fetch profiles timed out or failed, using local fallback:', err.message);
   }
 
-  const teachers = fallbackProfiles.filter(p => p.role !== 'admin');
-  return NextResponse.json({ success: true, teachers });
+  const formatted = teachersOnly.map(t => formatTeacherProfile(t, teachersOnly));
+  return NextResponse.json({ success: true, teachers: formatted });
 }
 
 export async function POST(request) {
@@ -92,7 +96,8 @@ export async function POST(request) {
       } catch (e) {
         console.warn('Supabase clear teachers error:', e);
       }
-      fallbackProfiles = fallbackProfiles.filter(p => p.role === 'admin');
+      const adminOnly = getStoredFaculty().filter(p => p.role === 'admin');
+      saveStoredFaculty(adminOnly);
       return NextResponse.json({ 
         success: true, 
         count: 0, 
@@ -102,46 +107,15 @@ export async function POST(request) {
 
     // 0.5 Restore Demo Teachers (for quick sales demos)
     if (action === 'admin_load_demo_teachers') {
-      const adminOnly = fallbackProfiles.filter(p => p.role === 'admin');
-      fallbackProfiles = [
-        ...adminOnly,
-        {
-          id: 't1',
-          name: 'Mrs. Priya Sharma',
-          email: 'priya@myschool.com',
-          password: 'priya@123',
-          role: 'class_teacher',
-          class_name: 'Class 8-A',
-          subject: 'Mathematics',
-          school: 'MySchool'
-        },
-        {
-          id: 't2',
-          name: 'Mr. Rajesh Patel',
-          email: 'rajesh@myschool.com',
-          password: 'rajesh@123',
-          role: 'subject_teacher',
-          class_name: 'Class 8-A',
-          subject: 'Science',
-          school: 'MySchool'
-        },
-        {
-          id: 't3',
-          name: 'Mrs. Sunita Verma',
-          email: 'sunita@myschool.com',
-          password: 'sunita@123',
-          role: 'subject_teacher',
-          class_name: 'Class 8-A',
-          subject: 'English',
-          school: 'MySchool'
-        }
-      ];
-      const teachers = fallbackProfiles.filter(p => p.role !== 'admin');
+      saveStoredFaculty(INITIAL_FACULTY);
+      const teachers = INITIAL_FACULTY.filter(p => p.role !== 'admin').map(t => formatTeacherProfile(t, INITIAL_FACULTY));
       return NextResponse.json({ success: true, teachers, message: 'Demo teachers restored.' });
     }
 
     // 1. Get Teachers List for Dropdown
     if (action === 'get_teachers') {
+      const storedFaculty = getStoredFaculty();
+      const teachersOnly = storedFaculty.filter(p => p.role !== 'admin');
       try {
         const { data, error } = await withTimeout(
           supabase
@@ -152,11 +126,11 @@ export async function POST(request) {
           1000
         );
 
-        if (!error && Array.isArray(data)) {
-          return NextResponse.json({ success: true, teachers: data });
+        if (!error && Array.isArray(data) && data.length > 0) {
+          return NextResponse.json({ success: true, teachers: data.map(t => formatTeacherProfile(t, teachersOnly)) });
         }
       } catch (e) {}
-      const teachers = fallbackProfiles.filter(p => p.role !== 'admin');
+      const teachers = teachersOnly.map(t => formatTeacherProfile(t, teachersOnly));
       return NextResponse.json({ success: true, teachers });
     }
 
@@ -435,22 +409,62 @@ export async function POST(request) {
 
     // 4. Admin Adds Teacher
     if (action === 'admin_add_teacher') {
-      const { name, email, role, className, subject } = body;
+      const { name, email, role, className, classTeacherOf, classes, subject } = body;
       const defaultPass = getDefaultPassword(name);
+
+      const assignedClassTeacherOf = role === 'class_teacher' ? (classTeacherOf || className || null) : null;
+      let assignedClasses = Array.isArray(classes) && classes.length > 0 
+        ? classes 
+        : (className ? [className] : ['Class 8-A', 'Class 8-B']);
+      if (assignedClassTeacherOf && !assignedClasses.includes(assignedClassTeacherOf)) {
+        assignedClasses = [assignedClassTeacherOf, ...assignedClasses];
+      }
+
+      let currentFaculty = getStoredFaculty();
+
+      // Enforce: Each class has only 1 Class Teacher.
+      if (assignedClassTeacherOf) {
+        currentFaculty = currentFaculty.map(p => {
+          if ((p.classTeacherOf === assignedClassTeacherOf || p.class_name?.includes(`${assignedClassTeacherOf} (CT)`)) && p.role === 'class_teacher') {
+            return { 
+              ...p, 
+              role: 'subject_teacher', 
+              classTeacherOf: null, 
+              class_teacher_of: null,
+              class_name: p.classes ? p.classes.join(', ') : 'Class 8-A'
+            };
+          }
+          return p;
+        });
+        try {
+          await supabase
+            .from('profiles')
+            .update({ role: 'subject_teacher' })
+            .ilike('class_name', `%${assignedClassTeacherOf}%`)
+            .eq('role', 'class_teacher');
+        } catch (e) {}
+      }
+
+      const encodedClassName = assignedClassTeacherOf 
+        ? `${assignedClassTeacherOf} (CT), ${assignedClasses.filter(c => c !== assignedClassTeacherOf).join(', ')}`
+        : assignedClasses.join(', ');
 
       const newTeacher = {
         id: `t_${Date.now()}`,
         name,
         email: email.toLowerCase(),
         password: defaultPass,
-        role: role || 'subject_teacher',
-        class_name: role === 'class_teacher' ? (className || 'Class 8-A') : className || null,
+        role: assignedClassTeacherOf ? 'class_teacher' : 'subject_teacher',
+        class_name: encodedClassName,
+        classes: assignedClasses,
+        classTeacherOf: assignedClassTeacherOf,
+        class_teacher_of: assignedClassTeacherOf,
         subject: subject || 'General',
         school: 'MySchool'
       };
 
       try {
-        const { data, error } = await supabase
+        await supabase
           .from('profiles')
           .insert({
             name: newTeacher.name,
@@ -460,28 +474,66 @@ export async function POST(request) {
             class_name: newTeacher.class_name,
             subject: newTeacher.subject,
             school: newTeacher.school
-          })
-          .select()
-          .single();
-
-        if (!error && data) {
-          return NextResponse.json({ success: true, teacher: data, defaultPassword: defaultPass });
-        }
+          });
       } catch (e) {}
 
-      fallbackProfiles.push(newTeacher);
-      return NextResponse.json({ success: true, teacher: newTeacher, defaultPassword: defaultPass });
+      currentFaculty.push(newTeacher);
+      saveStoredFaculty(currentFaculty);
+
+      const formatted = formatTeacherProfile(newTeacher, currentFaculty);
+      return NextResponse.json({ success: true, teacher: formatted, defaultPassword: defaultPass });
     }
 
     // 5. Admin Updates Teacher
     if (action === 'admin_update_teacher') {
-      const { id, name, email, role, className, subject, password } = body;
+      const { id, name, email, role, className, classTeacherOf, classes, subject, password } = body;
+
+      const assignedClassTeacherOf = role === 'class_teacher' ? (classTeacherOf || className || null) : null;
+      let assignedClasses = Array.isArray(classes) && classes.length > 0 
+        ? classes 
+        : (className ? (className.includes(',') ? className.split(',').map(c => c.trim()) : [className]) : ['Class 8-A', 'Class 8-B']);
+      if (assignedClassTeacherOf && !assignedClasses.includes(assignedClassTeacherOf)) {
+        assignedClasses = [assignedClassTeacherOf, ...assignedClasses];
+      }
+
+      let currentFaculty = getStoredFaculty();
+
+      // Enforce: Each class has only 1 Class Teacher.
+      if (assignedClassTeacherOf) {
+        currentFaculty = currentFaculty.map(p => {
+          if (p.id !== id && (p.classTeacherOf === assignedClassTeacherOf || p.class_name?.includes(`${assignedClassTeacherOf} (CT)`)) && p.role === 'class_teacher') {
+            return { 
+              ...p, 
+              role: 'subject_teacher', 
+              classTeacherOf: null, 
+              class_teacher_of: null,
+              class_name: p.classes ? p.classes.join(', ') : 'Class 8-A'
+            };
+          }
+          return p;
+        });
+        try {
+          await supabase
+            .from('profiles')
+            .update({ role: 'subject_teacher' })
+            .neq('id', id)
+            .ilike('class_name', `%${assignedClassTeacherOf}%`)
+            .eq('role', 'class_teacher');
+        } catch (e) {}
+      }
+
+      const encodedClassName = assignedClassTeacherOf 
+        ? `${assignedClassTeacherOf} (CT), ${assignedClasses.filter(c => c !== assignedClassTeacherOf).join(', ')}`
+        : assignedClasses.join(', ');
 
       const updateData = {
         name,
         email: email.toLowerCase(),
-        role,
-        class_name: className,
+        role: assignedClassTeacherOf ? 'class_teacher' : 'subject_teacher',
+        class_name: encodedClassName,
+        classes: assignedClasses,
+        classTeacherOf: assignedClassTeacherOf,
+        class_teacher_of: assignedClassTeacherOf,
         subject
       };
       if (password && password.trim()) {
@@ -491,15 +543,24 @@ export async function POST(request) {
       try {
         await supabase
           .from('profiles')
-          .update(updateData)
+          .update({
+            name: updateData.name,
+            email: updateData.email,
+            role: updateData.role,
+            class_name: updateData.class_name,
+            subject: updateData.subject,
+            ...(updateData.password ? { password: updateData.password } : {})
+          })
           .eq('id', id);
       } catch (e) {}
 
-      fallbackProfiles = fallbackProfiles.map(p => 
+      currentFaculty = currentFaculty.map(p => 
         p.id === id ? { ...p, ...updateData } : p
       );
+      saveStoredFaculty(currentFaculty);
 
-      return NextResponse.json({ success: true });
+      const formatted = formatTeacherProfile({ id, ...updateData }, currentFaculty);
+      return NextResponse.json({ success: true, teacher: formatted });
     }
 
     // 6. Admin Deletes Teacher
@@ -509,7 +570,10 @@ export async function POST(request) {
         await supabase.from('profiles').delete().eq('id', id);
       } catch (e) {}
 
-      fallbackProfiles = fallbackProfiles.filter(p => p.id !== id);
+      let currentFaculty = getStoredFaculty();
+      currentFaculty = currentFaculty.filter(p => p.id !== id);
+      saveStoredFaculty(currentFaculty);
+
       return NextResponse.json({ success: true });
     }
 

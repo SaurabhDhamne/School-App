@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Mail, Send, X } from 'lucide-react';
 
 export default function EmailModal({
@@ -9,11 +9,19 @@ export default function EmailModal({
   data,
   onConfirmSend,
 }) {
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
+
+  useEffect(() => {
+    if (data) {
+      setSubject(data.subject || '');
+      setMessage(data.message || '');
+    }
+  }, [data]);
+
   if (!isOpen || !data) return null;
 
-  const { student, type, subject: initialSubject, message: initialMessage } = data;
-  const [subject, setSubject] = useState(initialSubject);
-  const [message, setMessage] = useState(initialMessage);
+  const { student, type } = data;
 
   const handleSend = () => {
     onConfirmSend({ student, type, subject, message });

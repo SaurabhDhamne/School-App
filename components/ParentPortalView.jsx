@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getPdfBlobUrl } from '@/lib/pdfUtils';
+import TimetableModal from '@/components/TimetableModal';
 import {
     Calendar as CalendarIcon,
     BookOpen,
@@ -14,6 +15,8 @@ import {
     Search,
     Sparkles,
     FileText,
+    FileSpreadsheet,
+    Presentation,
     LogOut,
     Check,
     ZoomIn,
@@ -37,6 +40,60 @@ const AI_LANGUAGES = [
   { code: 'mr', label: 'मराठी', sublabel: 'Marathi', flag: '🇮🇳' },
   { code: 'gu', label: 'ગુજરાતી', sublabel: 'Gujarati', flag: '🇮🇳' }
 ];
+
+function getDocMeta(file) {
+  const name = (file?.name || '').toLowerCase();
+  const type = (file?.type || '').toLowerCase();
+  
+  if (type === 'pdf' || name.endsWith('.pdf')) {
+    return {
+      category: 'pdf',
+      label: 'PDF Document',
+      bgClass: 'bg-rose-50/50 border-rose-200/80 hover:bg-rose-100/50',
+      badgeClass: 'text-rose-500',
+      iconBg: 'bg-rose-500 text-white',
+      btnClass: 'bg-white hover:bg-rose-100 text-rose-800 border-rose-200'
+    };
+  }
+  if (type === 'word' || name.endsWith('.doc') || name.endsWith('.docx')) {
+    return {
+      category: 'word',
+      label: 'Word Document',
+      bgClass: 'bg-blue-50/50 border-blue-200/80 hover:bg-blue-100/50',
+      badgeClass: 'text-blue-500',
+      iconBg: 'bg-blue-600 text-white',
+      btnClass: 'bg-white hover:bg-blue-100 text-blue-800 border-blue-200'
+    };
+  }
+  if (type === 'excel' || name.endsWith('.xls') || name.endsWith('.xlsx') || name.endsWith('.csv')) {
+    return {
+      category: 'excel',
+      label: 'Excel Spreadsheet',
+      bgClass: 'bg-emerald-50/50 border-emerald-200/80 hover:bg-emerald-100/50',
+      badgeClass: 'text-emerald-500',
+      iconBg: 'bg-emerald-600 text-white',
+      btnClass: 'bg-white hover:bg-emerald-100 text-emerald-800 border-emerald-200'
+    };
+  }
+  if (type === 'ppt' || name.endsWith('.ppt') || name.endsWith('.pptx')) {
+    return {
+      category: 'ppt',
+      label: 'PowerPoint Presentation',
+      bgClass: 'bg-amber-50/50 border-amber-200/80 hover:bg-amber-100/50',
+      badgeClass: 'text-amber-600',
+      iconBg: 'bg-amber-500 text-white',
+      btnClass: 'bg-white hover:bg-amber-100 text-amber-800 border-amber-200'
+    };
+  }
+  return {
+    category: 'image',
+    label: 'Image',
+    bgClass: 'bg-indigo-50/50 border-indigo-200/80 hover:bg-indigo-100/50',
+    badgeClass: 'text-indigo-500',
+    iconBg: 'bg-indigo-600 text-white',
+    btnClass: 'bg-white hover:bg-indigo-100 text-indigo-800 border-indigo-200'
+  };
+}
 
 export default function ParentPortalView({
   currentUser,
@@ -80,6 +137,7 @@ export default function ParentPortalView({
   const [searchQuery, setSearchQuery] = useState('');
   const [subjectFilter, setSubjectFilter] = useState('All');
   const [completedHwMap, setCompletedHwMap] = useState({});
+  const [isTimetableOpen, setIsTimetableOpen] = useState(false);
 
   // AI Study Helper & Multi-Language Translation State
   const [expandedAiHwId, setExpandedAiHwId] = useState(null);
@@ -225,14 +283,33 @@ export default function ParentPortalView({
       }
     } catch (e) { }
 
-    // 2. Fetch live from server so phone immediately receives PC posts
+    // 2. Fetch live from server so phone immediately receives PC posts (with server-side privacy filtering)
     try {
-      const res = await fetch(`/api/homework?className=${encodeURIComponent(studentClass)}`, { cache: 'no-store' });
+      const rollParam = currentStudent?.rollNo ? `&studentRollNo=${encodeURIComponent(currentStudent.rollNo)}` : '';
+      const res = await fetch(`/api/homework?className=${encodeURIComponent(studentClass)}${rollParam}`, { cache: 'no-store' });
       const json = await res.json();
       if (json.success && Array.isArray(json.data)) {
         setHomeworkList(json.data);
+
+        // Pre-seed any already cached AI explanations from Cloud DB for instant 0ms access
+        const preloadedAi = {};
+        json.data.forEach(h => {
+          if (h.aiExplanations && typeof h.aiExplanations === 'object' && Object.keys(h.aiExplanations).length > 0) {
+            preloadedAi[h.id] = h.aiExplanations;
+          }
+        });
+        if (Object.keys(preloadedAi).length > 0) {
+          setAiExplainData(prev => ({ ...preloadedAi, ...prev }));
+        }
+
         try {
-          localStorage.setItem(HW_STORAGE_KEY, JSON.stringify(json.data));
+          const sanitized = json.data.map(h => ({
+            ...h,
+            attachments: (h.attachments || []).map(a => (typeof a?.url === 'string' && a.url.startsWith('data:') ? { ...a, url: null } : a)),
+            attachment: typeof h.attachment?.url === 'string' && h.attachment.url.startsWith('data:') ? { ...h.attachment, url: null } : h.attachment,
+            imageUrl: typeof h.imageUrl === 'string' && h.imageUrl.startsWith('data:') ? null : h.imageUrl
+          }));
+          localStorage.setItem(HW_STORAGE_KEY, JSON.stringify(sanitized));
         } catch (e) { }
       }
     } catch (err) {
@@ -298,11 +375,11 @@ const toggleHomeworkCompleted = (hwId) => {
   };
 
 // AI Homework Explainer & Multi-Language Translator Handler
-const handleToggleAiExplanation = async (hw, targetLang = null) => {
+const handleToggleAiExplanation = async (hw, targetLang = null, forceRefresh = false) => {
   const hwId = hw.id;
   const currentLang = targetLang || aiActiveLangMap[hwId] || 'en';
 
-  if (expandedAiHwId === hwId && !targetLang) {
+  if (expandedAiHwId === hwId && !targetLang && !forceRefresh) {
     // Toggle closed
     setExpandedAiHwId(null);
     return;
@@ -313,8 +390,8 @@ const handleToggleAiExplanation = async (hw, targetLang = null) => {
     setAiActiveLangMap(prev => ({ ...prev, [hwId]: targetLang }));
   }
 
-  // If already cached for this hw and language, return instantly
-  if (aiExplainData[hwId]?.[currentLang]) {
+  // If already cached for this hw and language, return instantly unless forcing refresh
+  if (!forceRefresh && aiExplainData[hwId]?.[currentLang]) {
     return;
   }
 
@@ -331,24 +408,40 @@ const handleToggleAiExplanation = async (hw, targetLang = null) => {
           deadlineDate: hw.deadlineDate,
           teacherName: hw.teacherName,
           attachment: hw.attachment,
+          attachments: hw.attachments,
           imageUrl: hw.imageUrl
         },
-        targetLanguage: currentLang
+        targetLanguage: currentLang,
+        forceRefresh: Boolean(forceRefresh)
       })
     });
 
-    const json = await res.json();
+    const json = await res.json().catch(() => ({}));
+
+    // Clean console output: strictly first 2 lines, visual doc attached, and last line successfully analyzed only
+    console.log(`AI Homework Analysis: ${hw.subject} (${currentLang.toUpperCase()})`);
+    console.log('HTTP Status:', res.status, res.statusText || 'OK');
+    console.log('Visual Document Attached:', Boolean(json.hasVisualAttachment));
+    if (json.source === 'gemini_ai' || json.success) {
+      console.log('Successfully analyzed');
+    } else {
+      console.log('Analysis error occurred');
+    }
+
     if (json.success && json.data) {
       setAiExplainData(prev => ({
         ...prev,
         [hwId]: {
           ...(prev[hwId] || {}),
-          [currentLang]: json.data
+          [currentLang]: {
+            ...json.data,
+            _source: json.source
+          }
         }
       }));
     }
   } catch (err) {
-    console.warn('Could not fetch AI homework explanation:', err);
+    console.error('Could not fetch AI homework explanation:', err);
   } finally {
     setAiLoadingHwId(null);
   }
@@ -412,11 +505,22 @@ const filteredHistory = useMemo(() => {
   return attendanceStats.historyRows;
 }, [attendanceStats, historyFilter]);
 
-// Scoped Homework strictly for child's class
+// Scoped Homework strictly for child's class & targeted students
 const classHomework = useMemo(() => {
   return homeworkList.filter(hw => {
     const matchClass = !hw.className || hw.className === 'All Classes' || hw.className === studentClass;
     if (!matchClass) return false;
+
+    // Student targeting check: If targeted to specific students, only show if child is in the list
+    if (Array.isArray(hw.targetRollNos) && hw.targetRollNos.length > 0) {
+      const myRoll = String(currentStudent.rollNo || '').trim();
+      const myRollNum = String(Number(myRoll) || '');
+      const isTargeted = hw.targetRollNos.some(r => {
+        const strR = String(r).trim();
+        return strR === myRoll || (myRollNum && strR === myRollNum) || (myRollNum && String(Number(strR) || '') === myRollNum);
+      });
+      if (!isTargeted) return false;
+    }
 
     if (subjectFilter !== 'All' && hw.subject !== subjectFilter) {
       return false;
@@ -432,7 +536,7 @@ const classHomework = useMemo(() => {
 
     return true;
   });
-}, [homeworkList, studentClass, subjectFilter, searchQuery]);
+}, [homeworkList, studentClass, subjectFilter, searchQuery, currentStudent.rollNo]);
 
 const totalHwCount = classHomework.length;
 const completedHwCount = classHomework.filter(hw => completedHwMap[hw.id]).length;
@@ -563,24 +667,36 @@ return (
                 </p>
               </div>
 
-              {/* Search Bar */}
-              <div className="relative min-w-[200px]">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  placeholder="Search homework..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
+              {/* Action Buttons: Timetable & Search */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setIsTimetableOpen(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200/80 font-bold text-xs transition-all shadow-2xs cursor-pointer"
+                  title="View your child's weekly timetable & bell times"
+                >
+                  <CalendarIcon className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Class Timetable</span>
+                </button>
+
+                {/* Search Bar */}
+                <div className="relative min-w-[200px] flex-1 sm:flex-initial">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Search homework..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -609,15 +725,21 @@ return (
               const isDone = !!completedHwMap[hw.id];
               const allAttachments = Array.isArray(hw.attachments) && hw.attachments.length > 0
                 ? hw.attachments
-                : (hw.attachment ? [hw.attachment] : hw.imageUrl ? [{
-              type: hw.imageUrl.startsWith('data:application/pdf') ? 'pdf' : 'image',
-                name: 'Worksheet File',
-            size: '',
-            url: hw.imageUrl
+                : (hw.attachment ? [hw.attachment] : (typeof hw.imageUrl === 'string' && hw.imageUrl) ? [{
+                    type: hw.imageUrl.startsWith('data:application/pdf') ? 'pdf' : 'image',
+                    name: 'Worksheet File',
+                    size: '',
+                    url: hw.imageUrl
                   }] : []);
 
-                const pdfFiles = allAttachments.filter(a => a?.type === 'pdf' || a?.name?.toLowerCase().endsWith('.pdf') || a?.url?.startsWith('data:application/pdf'));
-                const imgFiles = allAttachments.filter(a => a?.type === 'image' || (!a?.type && !a?.name?.toLowerCase().endsWith('.pdf')));
+                const docFiles = allAttachments.filter(a => {
+                  const meta = getDocMeta(a);
+                  return meta.category !== 'image';
+                });
+                const imgFiles = allAttachments.filter(a => {
+                  const meta = getDocMeta(a);
+                  return meta.category === 'image';
+                });
             const isOverdue = hw.hasDeadline && hw.deadlineDate && hw.deadlineDate < todayStr;
             const isDueToday = hw.hasDeadline && hw.deadlineDate === todayStr;
             const isAiExpanded = expandedAiHwId === hw.id;
@@ -652,6 +774,13 @@ return (
                     <span className="text-xs text-slate-600 font-medium">
                       By <strong className="text-slate-800 font-bold">{hw.teacherName || 'Teacher'}</strong>
                     </span>
+
+                    {Array.isArray(hw.targetRollNos) && hw.targetRollNos.length > 0 && (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-900 border border-amber-200/90 shadow-2xs">
+                        <Sparkles className="w-3 h-3 text-amber-600" />
+                        <span>Personal Notice for {currentStudent.name}</span>
+                      </span>
+                    )}
                   </div>
 
                   {/* Right Side: Parent Done Checkbox Toggle */}
@@ -675,88 +804,125 @@ return (
                   {hw.message}
                 </p>
 
-                {/* 3. Attached PDF Worksheets (Matching Teacher View Exactly: Large Red Squircle + Full Filename + Size + View & Download) */}
-                {pdfFiles.length > 0 && (
+                {/* 3. Attached Documents (PDF, Word, Excel, PowerPoint) */}
+                {docFiles.length > 0 && (
                   <div className="flex flex-col gap-2">
-                    {pdfFiles.map((pdf, pIdx) => (
-                      <div 
-                        key={pIdx}
-                        className="p-3 sm:p-3.5 rounded-2xl bg-rose-50/50 border border-rose-200/80 hover:bg-rose-100/50 transition-all flex items-center justify-between gap-3 group"
-                      >
+                    {docFiles.map((doc, dIdx) => {
+                      const meta = getDocMeta(doc);
+                      const docUrl = typeof doc?.url === 'string' ? doc.url : '';
+                      const isPdf = meta.category === 'pdf';
+                      const isOnlineUrl = docUrl && (docUrl.startsWith('http://') || docUrl.startsWith('https://'));
+                      const officeViewerUrl = !isPdf && isOnlineUrl
+                        ? `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(docUrl)}`
+                        : null;
+
+                      return (
                         <div 
-                          onClick={() => setSelectedPdf({
-                            url: pdf.url,
-                            name: pdf.name || `${hw.subject}_Worksheet_${pIdx + 1}.pdf`
-                          })}
-                          className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1 cursor-pointer"
-                          title="Click to view worksheet"
+                          key={dIdx}
+                          className={`p-3 sm:p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 group ${meta.bgClass}`}
                         >
-                          <div className="w-12 h-12 rounded-2xl bg-rose-500 text-white flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform">
-                            <FileText className="w-6 h-6 text-white" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-xs sm:text-sm font-bold text-slate-900 leading-snug break-words">
-                              {pdf.name || `${hw.subject}_Worksheet.pdf`}
-                            </p>
-                            <p className="text-xs font-semibold text-rose-500 mt-0.5">
-                              {pdf.size || 'PDF Document'}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedPdf({
-                              url: pdf.url,
-                              name: pdf.name || `${hw.subject}_Worksheet_${pIdx + 1}.pdf`
-                            })}
-                            className="px-3 py-1.5 rounded-xl bg-white hover:bg-rose-100 text-rose-800 border border-rose-200 text-xs font-bold transition-all cursor-pointer shadow-2xs flex items-center gap-1"
+                          <div 
+                            onClick={() => {
+                              if (isPdf && docUrl) {
+                                setSelectedPdf({
+                                  url: docUrl,
+                                  name: doc.name || `${hw.subject}_Worksheet_${dIdx + 1}.pdf`
+                                });
+                              } else if (officeViewerUrl) {
+                                window.open(officeViewerUrl, '_blank', 'noopener,noreferrer');
+                              }
+                            }}
+                            className="flex items-center gap-3 sm:gap-3.5 min-w-0 flex-1 cursor-pointer"
+                            title={isPdf ? "Click to view worksheet" : "Click to open in Office Web Viewer"}
                           >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>View</span>
-                          </button>
+                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform ${meta.iconBg}`}>
+                              {meta.category === 'excel' ? <FileSpreadsheet className="w-6 h-6 text-white" /> :
+                               meta.category === 'ppt' ? <Presentation className="w-6 h-6 text-white" /> :
+                               <FileText className="w-6 h-6 text-white" />}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs sm:text-sm font-bold text-slate-900 leading-snug break-words">
+                                {doc.name || `${hw.subject}_Attachment_${dIdx + 1}`}
+                              </p>
+                              <p className={`text-xs font-semibold mt-0.5 ${meta.badgeClass}`}>
+                                {doc.size || meta.label} • {meta.label}
+                              </p>
+                            </div>
+                          </div>
 
-                          {pdf.url && (
-                            <a
-                              href={pdf.url}
-                              download={pdf.name || 'Worksheet.pdf'}
-                              className="p-1.5 rounded-xl bg-white hover:bg-rose-100 text-rose-800 border border-rose-200 text-xs font-bold transition-all cursor-pointer shadow-2xs flex items-center justify-center"
-                              title="Download PDF"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                            </a>
-                          )}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isPdf && docUrl && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedPdf({
+                                  url: docUrl,
+                                  name: doc.name || `${hw.subject}_Worksheet_${dIdx + 1}.pdf`
+                                })}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs flex items-center gap-1 ${meta.btnClass}`}
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>View</span>
+                              </button>
+                            )}
+
+                            {!isPdf && officeViewerUrl && (
+                              <a
+                                href={officeViewerUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs flex items-center gap-1 ${meta.btnClass}`}
+                                title="Open in Office Online Viewer"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>Open</span>
+                              </a>
+                            )}
+
+                            {docUrl && (
+                              <a
+                                href={docUrl}
+                                download={doc.name || 'document'}
+                                className={`p-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs flex items-center justify-center ${meta.btnClass}`}
+                                title={`Download ${meta.label}`}
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
                 {/* 4. Attached Photo Preview (if any) */}
                 {imgFiles.length > 0 && (
                   <div className={`${imgFiles.length > 1 ? 'grid grid-cols-2 gap-2' : ''}`}>
-                    {imgFiles.map((img, iIdx) => (
-                      <div 
-                        key={iIdx}
-                        onClick={() => {
-                          setSelectedImage(img.url);
-                          setImageZoom(1);
-                        }}
-                        className="relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-950 flex items-center justify-center cursor-pointer group/img max-h-48"
-                        title="Click to view full photo"
-                      >
-                        <img 
-                          src={img.url} 
-                          alt={img.name || `Photo ${iIdx + 1}`} 
-                          className="object-cover w-full h-full group-hover/img:scale-105 transition-transform duration-200" 
-                        />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white text-xs font-bold">
-                          <Eye className="w-4 h-4" />
-                          <span>Click to Enlarge</span>
+                    {imgFiles.map((img, iIdx) => {
+                      const imgUrl = typeof img?.url === 'string' ? img.url : '';
+                      if (!imgUrl) return null;
+                      return (
+                        <div 
+                          key={iIdx}
+                          onClick={() => {
+                            setSelectedImage(imgUrl);
+                            setImageZoom(1);
+                          }}
+                          className="relative rounded-2xl overflow-hidden border border-slate-200 bg-slate-950 flex items-center justify-center cursor-pointer group/img max-h-48"
+                          title="Click to view full photo"
+                        >
+                          <img 
+                            src={imgUrl} 
+                            alt={img.name || `Photo ${iIdx + 1}`} 
+                            className="object-cover w-full h-full group-hover/img:scale-105 transition-transform duration-200" 
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-1.5 text-white text-xs font-bold">
+                            <Eye className="w-4 h-4" />
+                            <span>Click to Enlarge</span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
@@ -810,9 +976,34 @@ return (
                           <Sparkles className="w-4 h-4 text-amber-300" />
                         </div>
                         <div>
-                          <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                          <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                             <span>AI Homework Summary & Explanation</span>
-                            <span className="text-[10px] font-normal text-slate-500">(गृहपाठ सारांश व स्पष्टीकरण)</span>
+                            {currentAiData?._source === 'database_cache' && (
+                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 border border-emerald-200 shadow-2xs" title="Instant from verified Cloud DB cache">
+                                ⚡ Cloud Verified
+                              </span>
+                            )}
+                            {currentAiData?._source === 'gemini_ai' && (
+                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-800 border border-indigo-200 shadow-2xs">
+                                ✨ AI Vision Verified
+                              </span>
+                            )}
+                            {currentAiData?._source === 'smart_engine' && (
+                              <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200" title="Gemini server busy, smart engine active">
+                                ⚡ Smart Engine
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleToggleAiExplanation(hw, activeLang, true);
+                              }}
+                              className="p-1 rounded-lg text-indigo-500 hover:text-indigo-800 hover:bg-indigo-100/60 transition-colors cursor-pointer"
+                              title="Re-analyze worksheet with AI"
+                            >
+                              <RefreshCw className={`w-3.5 h-3.5 ${isLoadingThisAi ? 'animate-spin' : ''}`} />
+                            </button>
                           </h4>
                           <p className="text-[10px] text-slate-500 font-medium">
                             Plain explanation of the message, notice & attached worksheet in your language
@@ -857,6 +1048,15 @@ return (
                       </div>
                     ) : currentAiData ? (
                       <div className="flex flex-col gap-3 text-xs leading-relaxed">
+                        {/* AI-Derived Content Title if available */}
+                        {currentAiData.contentTitle && (
+                          <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-white border border-indigo-200/90 text-indigo-950 font-bold text-xs shadow-2xs">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                            <span className="text-[10px] uppercase tracking-wider text-indigo-500 font-extrabold shrink-0">Document:</span>
+                            <span className="truncate">{currentAiData.contentTitle}</span>
+                          </div>
+                        )}
+
                         {/* Main Clear Explanation & Summary */}
                         <div className="bg-white/95 p-3.5 rounded-2xl border border-indigo-100 shadow-2xs">
                           <p className="text-[11px] font-extrabold text-indigo-900 mb-1.5 uppercase tracking-wider flex items-center gap-1.5">
@@ -867,6 +1067,16 @@ return (
                             {currentAiData.explanation || currentAiData.summary}
                           </p>
                         </div>
+
+                        {/* Parent Supervision Tip */}
+                        {currentAiData.parentTip && (
+                          <div className="p-3 rounded-2xl bg-amber-50/90 border border-amber-200 text-amber-950 flex items-start gap-2.5 shadow-2xs">
+                            <span className="text-base leading-none select-none">💡</span>
+                            <div className="text-xs font-semibold leading-relaxed">
+                              {currentAiData.parentTip}
+                            </div>
+                          </div>
+                        )}
 
                         {/* Key Details at a Glance */}
                         {(currentAiData.keyPoints || currentAiData.topic || currentAiData.task) && (
@@ -1320,6 +1530,16 @@ return (
               </div>
             </div>
           )}
-          </div>
+
+          {/* Class Timetable Modal for Parents */}
+          <TimetableModal
+            isOpen={isTimetableOpen}
+            onClose={() => setIsTimetableOpen(false)}
+            defaultClass={studentClass}
+            currentUser={currentUser}
+            isParentView={true}
+            showToast={showToast}
+          />
+        </div>
       );
 }

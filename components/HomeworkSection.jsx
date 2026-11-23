@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { getPdfBlobUrl } from '@/lib/pdfUtils';
+import TimetableModal from '@/components/TimetableModal';
 import { 
   BookOpen, 
   Plus, 
@@ -10,6 +11,8 @@ import {
   Link as LinkIcon, 
   Image as ImageIcon, 
   FileText,
+  FileSpreadsheet,
+  Presentation,
   File,
   Eye,
   X, 
@@ -26,7 +29,10 @@ import {
   AlertCircle,
   ChevronDown,
   RefreshCw,
-  Upload
+  Upload,
+  Users,
+  UserCheck,
+  Lock
 } from 'lucide-react';
 
 const STORAGE_KEY = 'myschool_homework_posts';
@@ -74,15 +80,75 @@ function formatFileSize(bytes) {
   return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
+function getDocMeta(file) {
+  const name = (file?.name || '').toLowerCase();
+  const type = (file?.type || '').toLowerCase();
+  
+  if (type === 'pdf' || name.endsWith('.pdf')) {
+    return {
+      category: 'pdf',
+      label: 'PDF Document',
+      bgClass: 'bg-rose-50/70 border-rose-200/80',
+      badgeClass: 'bg-rose-100/70 text-rose-700',
+      iconBg: 'bg-rose-500 text-white',
+      btnClass: 'bg-white hover:bg-rose-100/60 border-rose-200 text-rose-800'
+    };
+  }
+  if (type === 'word' || name.endsWith('.doc') || name.endsWith('.docx')) {
+    return {
+      category: 'word',
+      label: 'Word Document',
+      bgClass: 'bg-blue-50/70 border-blue-200/80',
+      badgeClass: 'bg-blue-100/70 text-blue-700',
+      iconBg: 'bg-blue-600 text-white',
+      btnClass: 'bg-white hover:bg-blue-100/60 border-blue-200 text-blue-800'
+    };
+  }
+  if (type === 'excel' || name.endsWith('.xls') || name.endsWith('.xlsx') || name.endsWith('.csv')) {
+    return {
+      category: 'excel',
+      label: 'Excel Spreadsheet',
+      bgClass: 'bg-emerald-50/70 border-emerald-200/80',
+      badgeClass: 'bg-emerald-100/70 text-emerald-700',
+      iconBg: 'bg-emerald-600 text-white',
+      btnClass: 'bg-white hover:bg-emerald-100/60 border-emerald-200 text-emerald-800'
+    };
+  }
+  if (type === 'ppt' || name.endsWith('.ppt') || name.endsWith('.pptx')) {
+    return {
+      category: 'ppt',
+      label: 'PowerPoint Presentation',
+      bgClass: 'bg-amber-50/70 border-amber-200/80',
+      badgeClass: 'bg-amber-100/70 text-amber-700',
+      iconBg: 'bg-amber-500 text-white',
+      btnClass: 'bg-white hover:bg-amber-100/60 border-amber-200 text-amber-800'
+    };
+  }
+  return {
+    category: 'image',
+    label: 'Image / Photo',
+    bgClass: 'bg-indigo-50/70 border-indigo-200/80',
+    badgeClass: 'bg-indigo-100/70 text-indigo-700',
+    iconBg: 'bg-indigo-600 text-white',
+    btnClass: 'bg-white hover:bg-indigo-100/60 border-indigo-200 text-indigo-800'
+  };
+}
+
 export default function HomeworkSection({ 
   currentUser, 
   selectedClass = 'Class 8-A',
+  students = [],
   showToast, 
   isFullPage = false,
-  onNavigateToHomework 
+  onNavigateToHomework,
+  onNavigateToAcademics
 }) {
   const [homeworkList, setHomeworkList] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isTimetableOpen, setIsTimetableOpen] = useState(false);
+  const [isSubmittingHomework, setIsSubmittingHomework] = useState(false);
+  const [homeworkToDelete, setHomeworkToDelete] = useState(null);
+  const [isDeletingHomework, setIsDeletingHomework] = useState(false);
   const [selectedImage, setSelectedImage] = useState(null); // For Image Lightbox
   const [selectedPdf, setSelectedPdf] = useState(null); // For PDF Viewer Modal { url, name }
   const [pdfBlobUrl, setPdfBlobUrl] = useState(null);
@@ -184,6 +250,26 @@ export default function HomeworkSection({
     return d.toISOString().split('T')[0];
   });
 
+  // Target Audience State: 'all' (Entire Class) | 'specific' (Selected Students)
+  const [audienceType, setAudienceType] = useState('all');
+  const [selectedRollNos, setSelectedRollNos] = useState([]);
+  const [rosterStudents, setRosterStudents] = useState(() => students || []);
+
+  useEffect(() => {
+    if (students && students.length > 0) {
+      setRosterStudents(students);
+    } else {
+      fetch('/api/students')
+        .then(res => res.json())
+        .then(json => {
+          if (json.success && Array.isArray(json.data)) {
+            setRosterStudents(json.data.filter(s => (s.className || 'Class 8-A') === selectedClass));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [students, selectedClass]);
+
   const subjects = ['Mathematics', 'Science', 'English', 'Social Studies', 'Hindi', 'General Notice'];
 
   // Load from persistent backend API (Supabase as authoritative truth, localStorage as instant cache)
@@ -207,7 +293,13 @@ export default function HomeworkSection({
       if (json.success && Array.isArray(json.data)) {
         setHomeworkList(json.data);
         try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(json.data));
+          const sanitized = json.data.map(h => ({
+            ...h,
+            attachments: (h.attachments || []).map(a => (typeof a?.url === 'string' && a.url.startsWith('data:') ? { ...a, url: null } : a)),
+            attachment: typeof h.attachment?.url === 'string' && h.attachment.url.startsWith('data:') ? { ...h.attachment, url: null } : h.attachment,
+            imageUrl: typeof h.imageUrl === 'string' && h.imageUrl.startsWith('data:') ? null : h.imageUrl
+          }));
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitized));
         } catch (e) {}
       }
     } catch (err) {
@@ -247,11 +339,21 @@ export default function HomeworkSection({
     };
   }, [selectedClass]);
 
-  // Save to both state and backend API
-  const savePosts = async (newList) => {
+  // Save to state and sanitize before localStorage (stripping raw base64 data to prevent QuotaExceededError)
+  const savePosts = (newList) => {
     setHomeworkList(newList);
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(newList));
+      const sanitized = newList.map(post => {
+        const cleanAtts = Array.isArray(post.attachments)
+          ? post.attachments.map(a => typeof a?.url === 'string' && a.url.startsWith('data:') ? { ...a, url: null } : a)
+          : post.attachments;
+        const cleanAtt = typeof post.attachment?.url === 'string' && post.attachment.url.startsWith('data:')
+          ? { ...post.attachment, url: null }
+          : post.attachment;
+        const cleanImg = typeof post.imageUrl === 'string' && post.imageUrl.startsWith('data:') ? null : post.imageUrl;
+        return { ...post, attachments: cleanAtts, attachment: cleanAtt, imageUrl: cleanImg };
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitized));
     } catch (e) {
       console.warn('LocalStorage save error:', e);
     }
@@ -268,10 +370,10 @@ export default function HomeworkSection({
       return;
     }
 
-    const maxBytes = 30 * 1024 * 1024; // 30 MB per file limit
+    const maxBytes = 50 * 1024 * 1024; // 50 MB per file limit
     const oversized = rawFiles.find(f => f.size > maxBytes);
     if (oversized) {
-      showToast?.(`⚠️ "${oversized.name}" exceeds the 30MB size limit. Max 30MB per file.`);
+      showToast?.(`⚠️ "${oversized.name}" exceeds the 50MB size limit. Max 50MB per file.`);
       e.target.value = '';
       return;
     }
@@ -337,6 +439,16 @@ export default function HomeworkSection({
       return;
     }
 
+    if (audienceType === 'specific' && selectedRollNos.length === 0) {
+      showToast?.('⚠️ Please pick at least one student, or switch to "Entire Class"');
+      return;
+    }
+
+    const targetRollNos = audienceType === 'specific' ? selectedRollNos : [];
+    const targetStudentNames = audienceType === 'specific'
+      ? selectedRollNos.map(r => rosterStudents.find(s => s.rollNo === r)?.name || `Roll #${r}`)
+      : [];
+
     const now = new Date();
     const formattedTime = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + 
       ', ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -349,6 +461,8 @@ export default function HomeworkSection({
       teacherRole: currentUser?.role || 'class_teacher',
       message: message.trim(),
       link: link.trim(),
+      targetRollNos,
+      targetStudentNames,
       attachments: attachedFiles,
       attachment: attachedFiles[0] || null,
       imageUrl: attachedFiles.find(f => f.type === 'image')?.url || null,
@@ -357,38 +471,51 @@ export default function HomeworkSection({
       deadlineDate: hasDeadline ? deadlineDate : null
     };
 
-    // Optimistic update
-    const updated = [newPost, ...homeworkList.filter(h => h.id !== newPost.id)];
-    savePosts(updated);
-    showToast?.('📢 Homework & notice posted successfully!');
-    
-    // Reset form & close modal immediately
-    setMessage('');
-    setLink('');
-    setAttachedFiles([]);
-    setHasDeadline(false);
-    setIsModalOpen(false);
+    setIsSubmittingHomework(true);
 
-    // Sync to backend database so phone and all parents receive it
     try {
+      // Sync to backend database first so server confirms before clearing form
       const res = await fetch('/api/homework', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'create', post: newPost })
       });
-      const json = await res.json();
-      if (json.success && json.post) {
-        // Reconcile state and cache with confirmed server post
-        setHomeworkList(prev => [json.post, ...prev.filter(h => h.id !== json.post.id && h.id !== newPost.id)]);
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok || !json.success) {
+        showToast?.(`❌ Failed to post homework: ${json.error || 'Server error'}. Please try again.`);
+        setIsSubmittingHomework(false);
+        return; // Keep modal open, form preserved!
       }
+
+      const confirmedPost = json.post || newPost;
+      const updated = [confirmedPost, ...homeworkList.filter(h => h.id !== confirmedPost.id && h.id !== newPost.id)];
+      savePosts(updated);
+
+      showToast?.(audienceType === 'specific' 
+        ? `🔒 Personal notice posted for ${targetStudentNames.length} student${targetStudentNames.length > 1 ? 's' : ''}!`
+        : '📢 Homework & notice posted successfully to class!'
+      );
+      
+      // Reset form & close modal only on confirmed success
+      setMessage('');
+      setLink('');
+      setAttachedFiles([]);
+      setHasDeadline(false);
+      setAudienceType('all');
+      setSelectedRollNos([]);
+      setIsModalOpen(false);
     } catch (err) {
-      console.warn('Backend homework sync error:', err);
+      console.error('Backend homework sync error:', err);
+      showToast?.(`❌ Network error posting homework: ${err.message}. Please check connection.`);
+    } finally {
+      setIsSubmittingHomework(false);
     }
   };
 
-  const handleDelete = async (id, postTeacherName) => {
+  const handleDelete = (hw) => {
     const isAdmin = currentUser?.role === 'admin';
-    const isOwner = currentUser?.name === postTeacherName;
+    const isOwner = currentUser?.name === hw.teacherName;
     const isClassTeacher = currentUser?.role === 'class_teacher';
 
     if (!isAdmin && !isOwner && !isClassTeacher) {
@@ -396,20 +523,35 @@ export default function HomeworkSection({
       return;
     }
 
-    if (confirm('Are you sure you want to delete this homework post?')) {
+    setHomeworkToDelete(hw);
+  };
+
+  const confirmDeleteHomework = async () => {
+    if (!homeworkToDelete) return;
+    setIsDeletingHomework(true);
+    const id = homeworkToDelete.id;
+    try {
+      const res = await fetch('/api/homework', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', id })
+      });
+      const json = await res.json().catch(() => ({}));
+
+      if (!res.ok || !json.success) {
+        showToast?.(`⚠️ Could not delete post: ${json.error || 'Server error'}`);
+        return;
+      }
+
       const filtered = homeworkList.filter(hw => hw.id !== id);
       savePosts(filtered);
       showToast?.('🗑️ Homework post removed');
-
-      try {
-        await fetch('/api/homework', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'delete', id })
-        });
-      } catch (err) {
-        console.warn('Backend homework delete error:', err);
-      }
+      setHomeworkToDelete(null);
+    } catch (err) {
+      console.warn('Backend homework delete error:', err);
+      showToast?.('⚠️ Network error deleting post. Please try again.');
+    } finally {
+      setIsDeletingHomework(false);
     }
   };
 
@@ -463,11 +605,20 @@ export default function HomeworkSection({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          <button
+            onClick={() => setIsTimetableOpen(true)}
+            className="flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-2xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200/80 font-bold text-xs shadow-xs transition-all cursor-pointer"
+            title="View weekly class timetable & bell schedule"
+          >
+            <Calendar className="w-4 h-4 text-amber-600" />
+            <span>Class Timetable</span>
+          </button>
+
           {!isFullPage && onNavigateToHomework && (
             <button
               onClick={onNavigateToHomework}
-              className="px-3.5 py-2 rounded-2xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs transition-all"
+              className="px-3.5 py-2 rounded-2xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs transition-all cursor-pointer"
             >
               Full Hub
             </button>
@@ -475,7 +626,7 @@ export default function HomeworkSection({
 
           <button
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-100 transition-all"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-md shadow-indigo-100 transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Post Homework / Notice</span>
@@ -567,15 +718,21 @@ export default function HomeworkSection({
             // Support both new multi-attachment array and legacy single attachment/imageUrl
             const allAttachments = Array.isArray(hw.attachments) && hw.attachments.length > 0
               ? hw.attachments
-              : (hw.attachment ? [hw.attachment] : hw.imageUrl ? [{
+              : (hw.attachment ? [hw.attachment] : (typeof hw.imageUrl === 'string' && hw.imageUrl) ? [{
                   type: hw.imageUrl.startsWith('data:application/pdf') ? 'pdf' : 'image',
                   name: 'Worksheet File',
                   size: '',
                   url: hw.imageUrl
                 }] : []);
 
-            const pdfFiles = allAttachments.filter(a => a?.type === 'pdf' || a?.name?.toLowerCase().endsWith('.pdf') || a?.url?.startsWith('data:application/pdf'));
-            const imgFiles = allAttachments.filter(a => a?.type === 'image' || (!a?.type && !a?.name?.toLowerCase().endsWith('.pdf')));
+            const docFiles = allAttachments.filter(a => {
+              const meta = getDocMeta(a);
+              return meta.category !== 'image';
+            });
+            const imgFiles = allAttachments.filter(a => {
+              const meta = getDocMeta(a);
+              return meta.category === 'image';
+            });
 
             return (
               <div 
@@ -599,11 +756,24 @@ export default function HomeworkSection({
                       <span className="text-[11px] font-semibold text-slate-500">
                         By {hw.teacherName}
                       </span>
+
+                      {Array.isArray(hw.targetRollNos) && hw.targetRollNos.length > 0 ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200 shadow-2xs" title={`Visible to: ${hw.targetStudentNames?.join(', ') || hw.targetRollNos.join(', ')}`}>
+                          <Lock className="w-3 h-3 text-purple-600" />
+                          <span>Private: {hw.targetStudentNames?.length === 1 ? hw.targetStudentNames[0] : `${hw.targetRollNos.length} students`}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100/90 text-slate-600 border border-slate-200/80">
+                          <Users className="w-3 h-3 text-slate-400" />
+                          <span>Class Notice</span>
+                        </span>
+                      )}
                     </div>
 
                     <button
-                      onClick={() => handleDelete(hw.id, hw.teacherName)}
-                      className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors opacity-80 group-hover:opacity-100"
+                      type="button"
+                      onClick={() => handleDelete(hw)}
+                      className="p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors opacity-80 group-hover:opacity-100 cursor-pointer"
                       title="Delete homework post"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -615,79 +785,108 @@ export default function HomeworkSection({
                     {hw.message}
                   </p>
 
-                  {/* Attached PDF Worksheets (Support multiple) */}
-                  {pdfFiles.length > 0 && (
+                  {/* Attached Documents (PDF, Word, Excel, PowerPoint) */}
+                  {docFiles.length > 0 && (
                     <div className="flex flex-col gap-1.5 mt-0.5">
-                      {pdfFiles.map((pdf, pIdx) => (
-                        <div key={pIdx} className="p-2.5 rounded-2xl bg-rose-50/70 border border-rose-200/80 flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-8 h-8 rounded-xl bg-rose-500 text-white flex items-center justify-center shrink-0 shadow-xs">
-                              <FileText className="w-4 h-4" />
+                      {docFiles.map((doc, dIdx) => {
+                        const meta = getDocMeta(doc);
+                        const docUrl = typeof doc?.url === 'string' ? doc.url : '';
+                        const isPdf = meta.category === 'pdf';
+                        const isOnlineUrl = docUrl && (docUrl.startsWith('http://') || docUrl.startsWith('https://'));
+                        const officeViewerUrl = !isPdf && isOnlineUrl
+                          ? `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(docUrl)}`
+                          : null;
+
+                        return (
+                          <div key={dIdx} className={`p-2.5 rounded-2xl border flex items-center justify-between gap-2 ${meta.bgClass}`}>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 shadow-xs ${meta.iconBg}`}>
+                                {meta.category === 'excel' ? <FileSpreadsheet className="w-4 h-4" /> :
+                                 meta.category === 'ppt' ? <Presentation className="w-4 h-4" /> :
+                                 <FileText className="w-4 h-4" />}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-xs font-bold text-slate-800 truncate">
+                                  {doc.name || `${hw.subject}_Attachment_${dIdx + 1}`}
+                                </p>
+                                <span className={`text-[10px] font-semibold px-1.5 py-0.2 rounded ${meta.badgeClass}`}>
+                                  {doc.size || meta.label}
+                                </span>
+                              </div>
                             </div>
-                            <div className="min-w-0">
-                              <p className="text-xs font-bold text-slate-800 truncate">
-                                {pdf.name || `Worksheet_${pIdx + 1}.pdf`}
-                              </p>
-                              <span className="text-[10px] font-semibold text-rose-700 bg-rose-100/70 px-1.5 py-0.2 rounded">
-                                {pdf.size || 'PDF Document'}
-                              </span>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              {isPdf && docUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedPdf({ url: docUrl, name: doc.name || 'Worksheet.pdf' })}
+                                  className={`px-2 py-1 rounded-xl font-bold text-[11px] flex items-center gap-1 shadow-xs transition-all ${meta.btnClass}`}
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>View</span>
+                                </button>
+                              )}
+
+                              {!isPdf && officeViewerUrl && (
+                                <a
+                                  href={officeViewerUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className={`px-2 py-1 rounded-xl font-bold text-[11px] flex items-center gap-1 shadow-xs transition-all ${meta.btnClass}`}
+                                  title="Preview document in Office Web Viewer"
+                                >
+                                  <Eye className="w-3.5 h-3.5" />
+                                  <span>Open</span>
+                                </a>
+                              )}
+
+                              {docUrl && (
+                                <a
+                                  href={docUrl}
+                                  download={doc.name || 'document'}
+                                  className={`p-1 rounded-xl shadow-xs transition-all ${meta.btnClass}`}
+                                  title={`Download ${meta.label}`}
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                </a>
+                              )}
                             </div>
                           </div>
-
-                          <div className="flex items-center gap-1 shrink-0">
-                            {pdf.url && (
-                              <button
-                                type="button"
-                                onClick={() => setSelectedPdf({ url: pdf.url, name: pdf.name || 'Worksheet.pdf' })}
-                                className="px-2 py-1 rounded-xl bg-white hover:bg-rose-100/60 border border-rose-200 text-rose-800 font-bold text-[11px] flex items-center gap-1 shadow-xs transition-all"
-                              >
-                                <Eye className="w-3.5 h-3.5" />
-                                <span>View</span>
-                              </button>
-                            )}
-
-                            {pdf.url && (
-                              <a
-                                href={pdf.url}
-                                download={pdf.name || 'Worksheet.pdf'}
-                                className="p-1 rounded-xl bg-white hover:bg-rose-100/60 border border-rose-200 text-rose-800 shadow-xs transition-all"
-                                title="Download PDF"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
                   {/* Attached Worksheet Photos (Single or Gallery Grid) */}
                   {imgFiles.length > 0 && (
                     <div className={`mt-1 ${imgFiles.length > 1 ? 'grid grid-cols-2 gap-1.5' : ''}`}>
-                      {imgFiles.map((img, iIdx) => (
-                        <div 
-                          key={iIdx}
-                          onClick={() => {
-                            setSelectedImage(img.url);
-                            setImageZoom(1);
-                          }}
-                          className={`relative rounded-xl overflow-hidden border border-slate-200 bg-slate-950 flex items-center justify-center cursor-pointer group/img ${
-                            imgFiles.length > 1 ? 'h-24' : 'max-h-40'
-                          }`}
-                          title="Click to view full photo"
-                        >
-                          <img 
-                            src={img.url} 
-                            alt={img.name || `Photo ${iIdx + 1}`} 
-                            className="object-cover w-full h-full group-hover/img:scale-105 transition-transform duration-200" 
-                          />
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-1 text-white text-[10px] font-bold">
-                            <Maximize2 className="w-3.5 h-3.5" />
-                            <span>Enlarge</span>
+                      {imgFiles.map((img, iIdx) => {
+                        const imgUrl = typeof img?.url === 'string' ? img.url : '';
+                        if (!imgUrl) return null;
+                        return (
+                          <div 
+                            key={iIdx}
+                            onClick={() => {
+                              setSelectedImage(imgUrl);
+                              setImageZoom(1);
+                            }}
+                            className={`relative rounded-xl overflow-hidden border border-slate-200 bg-slate-950 flex items-center justify-center cursor-pointer group/img ${
+                              imgFiles.length > 1 ? 'h-24' : 'max-h-40'
+                            }`}
+                            title="Click to view full photo"
+                          >
+                            <img 
+                              src={imgUrl} 
+                              alt={img.name || `Photo ${iIdx + 1}`} 
+                              className="object-cover w-full h-full group-hover/img:scale-105 transition-transform duration-200" 
+                            />
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center gap-1 text-white text-[10px] font-bold">
+                              <Maximize2 className="w-3.5 h-3.5" />
+                              <span>Enlarge</span>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
@@ -777,6 +976,121 @@ export default function HomeworkSection({
                 )}
               </div>
 
+              {/* Target Audience: Entire Class vs Specific Student(s) */}
+              <div className="flex flex-col gap-2 p-3 rounded-2xl bg-slate-50 border border-slate-200/80">
+                <div className="flex items-center justify-between">
+                  <label className="font-bold text-slate-800 flex items-center gap-1.5 text-xs">
+                    <Users className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Who can see this post?</span>
+                  </label>
+                  <span className="text-[11px] font-semibold text-slate-500">
+                    {audienceType === 'all' 
+                      ? 'Entire Class' 
+                      : `${selectedRollNos.length} of ${rosterStudents.length} selected`}
+                  </span>
+                </div>
+
+                {/* Audience Mode Switcher */}
+                <div className="grid grid-cols-2 gap-1.5 bg-slate-200/60 p-1 rounded-xl text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAudienceType('all');
+                      setSelectedRollNos([]);
+                    }}
+                    className={`py-1.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      audienceType === 'all'
+                        ? 'bg-white text-indigo-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>Entire Class (Default)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAudienceType('specific');
+                      if (selectedRollNos.length === 0 && rosterStudents.length > 0) {
+                        setSelectedRollNos([rosterStudents[0].rollNo]);
+                      }
+                    }}
+                    className={`py-1.5 px-3 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      audienceType === 'specific'
+                        ? 'bg-white text-indigo-900 shadow-xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>Specific Student(s)</span>
+                  </button>
+                </div>
+
+                {/* Specific Students Checklist */}
+                {audienceType === 'specific' && (
+                  <div className="flex flex-col gap-2 pt-2 border-t border-slate-200/80 animate-in fade-in duration-150">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-slate-500">
+                        Select student(s) who will receive this in their feed:
+                      </span>
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedRollNos(rosterStudents.map(s => s.rollNo))}
+                          className="text-indigo-600 font-bold hover:underline"
+                        >
+                          Select All
+                        </button>
+                        <span className="text-slate-300">&bull;</span>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedRollNos([])}
+                          className="text-slate-400 font-bold hover:underline"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    {rosterStudents.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 italic py-1">No students found for {selectedClass}.</p>
+                    ) : (
+                      <div className="max-h-36 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-1.5 p-1 bg-white rounded-xl border border-slate-200">
+                        {rosterStudents.map(st => {
+                          const isChecked = selectedRollNos.includes(st.rollNo);
+                          return (
+                            <label
+                              key={st.rollNo}
+                              className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors text-xs ${
+                                isChecked 
+                                  ? 'bg-indigo-50/90 text-indigo-950 font-bold border border-indigo-200/60' 
+                                  : 'hover:bg-slate-50 text-slate-700 font-medium border border-transparent'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedRollNos(prev => [...prev, st.rollNo]);
+                                  } else {
+                                    setSelectedRollNos(prev => prev.filter(r => r !== st.rollNo));
+                                  }
+                                }}
+                                className="w-3.5 h-3.5 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                              />
+                              <span className="text-[10px] text-slate-400 font-mono">#{st.rollNo}</span>
+                              <span className="truncate">{st.name}</span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
               {/* Message / Task Description */}
               <div>
                 <label className="font-semibold text-slate-700">Homework Instructions / Notice</label>
@@ -820,30 +1134,34 @@ export default function HomeworkSection({
                 {/* List of Attached Files */}
                 {attachedFiles.length > 0 && (
                   <div className="flex flex-col gap-1.5 max-h-48 overflow-y-auto pr-0.5">
-                    {attachedFiles.map((file, idx) => (
-                      <div key={idx} className="rounded-2xl border border-slate-200 p-2.5 bg-slate-50 flex items-center justify-between gap-2.5 shadow-xs">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
-                            file.type === 'pdf' ? 'bg-rose-500 text-white' : 'bg-indigo-600 text-white'
-                          }`}>
-                            {file.type === 'pdf' ? <FileText className="w-4 h-4" /> : <ImageIcon className="w-4 h-4" />}
+                    {attachedFiles.map((file, idx) => {
+                      const meta = getDocMeta(file);
+                      return (
+                        <div key={idx} className="rounded-2xl border border-slate-200 p-2.5 bg-slate-50 flex items-center justify-between gap-2.5 shadow-xs">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${meta.iconBg}`}>
+                              {meta.category === 'excel' ? <FileSpreadsheet className="w-4 h-4" /> :
+                               meta.category === 'ppt' ? <Presentation className="w-4 h-4" /> :
+                               meta.category === 'image' ? <ImageIcon className="w-4 h-4" /> :
+                               <FileText className="w-4 h-4" />}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-slate-800 truncate">{file.name}</p>
+                              <p className="text-[10px] text-slate-400 font-semibold">{file.size} • {meta.label}</p>
+                            </div>
                           </div>
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-slate-800 truncate">{file.name}</p>
-                            <p className="text-[10px] text-slate-400 font-semibold">{file.size} • {file.type.toUpperCase()}</p>
-                          </div>
-                        </div>
 
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveAttachment(idx)}
-                          className="p-1.5 rounded-lg hover:bg-rose-100/70 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
-                          title="Remove this file"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveAttachment(idx)}
+                            className="p-1.5 rounded-lg hover:bg-rose-100/70 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                            title="Remove this file"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -859,13 +1177,13 @@ export default function HomeworkSection({
                       <Upload className="w-4 h-4 text-indigo-600" />
                       <span className="text-xs font-semibold">
                         {attachedFiles.length === 0 
-                          ? 'Click to upload Photos or PDF Worksheets (Max 5, up to 30MB each)' 
+                          ? 'Click to upload Photos, PDF, Word, Excel, or PPT files (Max 5, up to 50MB each)' 
                           : `+ Add more files (${5 - attachedFiles.length} slots left)`}
                       </span>
                       <input 
                         type="file" 
                         multiple
-                        accept="image/*,application/pdf" 
+                        accept="image/*,application/pdf,.pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation" 
                         onChange={handleFileUpload} 
                         className="hidden" 
                       />
@@ -914,10 +1232,15 @@ export default function HomeworkSection({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-md shadow-indigo-100 flex items-center gap-1.5"
+                  disabled={isSubmittingHomework}
+                  className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-md shadow-indigo-100 flex items-center gap-1.5 disabled:opacity-60 cursor-pointer"
                 >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Publish to Class</span>
+                  {isSubmittingHomework ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Send className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isSubmittingHomework ? 'Publishing...' : 'Publish to Class'}</span>
                 </button>
               </div>
 
@@ -1158,6 +1481,56 @@ export default function HomeworkSection({
                 </div>
               )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Timetable Modal */}
+      <TimetableModal 
+        isOpen={isTimetableOpen} 
+        onClose={() => setIsTimetableOpen(false)} 
+        defaultClass={selectedClass} 
+        currentUser={currentUser}
+        showToast={showToast}
+        onNavigateToAcademics={onNavigateToAcademics}
+      />
+
+      {/* CONFIRM DELETE HOMEWORK MODAL */}
+      {homeworkToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-slate-100 flex flex-col gap-4 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 mx-auto flex items-center justify-center shadow-xs">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="text-base font-bold text-slate-900">Delete Homework Post?</h4>
+              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                Are you sure you want to remove this announcement for <strong>{homeworkToDelete.subject}</strong>? Parents will no longer see it.
+              </p>
+              {homeworkToDelete.message && (
+                <div className="mt-2.5 p-2.5 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 italic text-left max-h-20 overflow-hidden text-ellipsis line-clamp-2">
+                  &ldquo;{homeworkToDelete.message}&rdquo;
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setHomeworkToDelete(null)}
+                disabled={isDeletingHomework}
+                className="py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteHomework}
+                disabled={isDeletingHomework}
+                className="py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-200 cursor-pointer"
+              >
+                {isDeletingHomework ? 'Deleting...' : 'Yes, Delete Post'}
+              </button>
             </div>
           </div>
         </div>

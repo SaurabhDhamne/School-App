@@ -71,14 +71,23 @@ CREATE TABLE IF NOT EXISTS public.homework (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
 );
 
+-- 8. Create SCHOOL_TIMETABLES Table (Cloud Timetable Storage Per Class)
+CREATE TABLE IF NOT EXISTS public.school_timetables (
+  class_name TEXT PRIMARY KEY,
+  schedule JSONB NOT NULL,
+  periods JSONB,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
+);
+
 -- ==============================================================
--- 8. ROW LEVEL SECURITY (RLS) POLICIES
+-- 9. ROW LEVEL SECURITY (RLS) POLICIES
 -- ==============================================================
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.marks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.homework ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.school_timetables ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow public read profiles" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Allow public modify profiles" ON public.profiles FOR ALL USING (true) WITH CHECK (true);
@@ -87,6 +96,7 @@ CREATE POLICY "Allow all access to students" ON public.students FOR ALL USING (t
 CREATE POLICY "Allow all access to attendance" ON public.attendance FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all access to marks" ON public.marks FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all access to homework" ON public.homework FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all access to school_timetables" ON public.school_timetables FOR ALL USING (true) WITH CHECK (true);
 
 -- ==============================================================
 -- 8. SEED DATA: 1 ADMIN + EXACTLY 3 TEACHERS (MySchool)

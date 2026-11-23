@@ -26,7 +26,8 @@ export default function DashboardTab({
   calculateTotal,
   calculatePercentage,
   getGrade,
-  showToast
+  showToast,
+  onNavigateToAcademics
 }) {
   const totalStudents = students.length;
   const presentCount = students.filter(s => s.attendance === 'P').length;
@@ -149,7 +150,7 @@ export default function DashboardTab({
           </div>
           <div>
             <h3 className="text-base font-bold text-slate-900 group-hover:text-amber-600 transition-colors">Broadcast Parent Reports</h3>
-            <p className="text-xs text-slate-500 mt-1">Instantly dispatch customized email report cards to all registered parents in one click.</p>
+            <p className="text-xs text-slate-500 mt-1">Dispatch customized email report cards to all registered parents with confirmation.</p>
           </div>
         </div>
 
@@ -158,9 +159,12 @@ export default function DashboardTab({
       {/* CLASS HOMEWORK & NOTICE BOARD */}
       <HomeworkSection 
         currentUser={currentUser} 
+        selectedClass={selectedClass}
+        students={students}
         showToast={showToast} 
         isFullPage={false}
         onNavigateToHomework={() => onNavigate('homework')}
+        onNavigateToAcademics={onNavigateToAcademics}
       />
 
       {/* Students Needing Support: Only shown if any students have score <60% */}

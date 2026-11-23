@@ -46,11 +46,37 @@ export default function AdminTab({
   customHolidays = [],
   onRefreshHolidays,
   schoolConfig: externalSchoolConfig,
-  onUpdateConfig
+  onUpdateConfig,
+  selectedClass = 'Class 8-A',
+  onChangeClass,
+  initialSubTab = 'teachers'
 }) {
-  const [activeAdminSubTab, setActiveAdminSubTab] = useState('teachers'); // 'teachers' | 'students' | 'holidays' | 'academics'
-  const [selectedClassFilter, setSelectedClassFilter] = useState('all'); // 'all' | 'Class 8-A' | etc.
+  const [activeAdminSubTab, setActiveAdminSubTab] = useState(() => initialSubTab || 'teachers'); // 'teachers' | 'students' | 'holidays' | 'academics'
+  const [selectedClassFilter, setSelectedClassFilter] = useState(() => selectedClass || 'all');
+  const [academicClassFilter, setAcademicClassFilter] = useState(() => selectedClass || 'all');
   const studentFileInputRef = useRef(null);
+
+  // Sync initialSubTab whenever passed dynamically (e.g. from Timetable Manage Subjects)
+  useEffect(() => {
+    if (initialSubTab) {
+      setActiveAdminSubTab(initialSubTab);
+    }
+  }, [initialSubTab]);
+
+  // Sync selectedClassFilter and academicClassFilter whenever selectedClass prop changes from the top Navbar
+  useEffect(() => {
+    if (selectedClass) {
+      setSelectedClassFilter(selectedClass);
+      setAcademicClassFilter(selectedClass);
+    }
+  }, [selectedClass]);
+
+  const handleSelectClassFilter = (cls) => {
+    setSelectedClassFilter(cls);
+    if (cls !== 'all' && typeof onChangeClass === 'function') {
+      onChangeClass(cls);
+    }
+  };
 
   // Centralized School & Academic Configuration State
   const [localConfig, setLocalConfig] = useState(() => externalSchoolConfig || getSchoolConfig());
@@ -75,6 +101,7 @@ export default function AdminTab({
   const [subjectLabelInput, setSubjectLabelInput] = useState('');
   const [subjectMaxMarksInput, setSubjectMaxMarksInput] = useState(25);
   const [subjectTeacherInput, setSubjectTeacherInput] = useState('');
+  const [subjectClassesInput, setSubjectClassesInput] = useState(['All Classes']);
   const [subjectToDelete, setSubjectToDelete] = useState(null);
   const [isSavingSubject, setIsSavingSubject] = useState(false);
 
@@ -94,25 +121,62 @@ export default function AdminTab({
 
   // Available classes in School from centralized config
   const schoolConfig = getSchoolConfig();
-  const schoolClasses = schoolConfig.classes && schoolConfig.classes.length > 0
-    ? schoolConfig.classes
-    : [
-        'Class 8-A',
-        'Class 8-B',
-        'Class 9-A',
-        'Class 9-B',
-        'Class 10-A',
-        'Class 10-B',
-        'Class 7-A',
-        'Class 7-B',
-      ];
+  const schoolClasses = localConfig.classes && localConfig.classes.length > 0
+    ? localConfig.classes
+    : (schoolConfig.classes && schoolConfig.classes.length > 0
+      ? schoolConfig.classes
+      : [
+          'Class 8-A',
+          'Class 8-B',
+          'Class 9-A',
+          'Class 9-B',
+          'Class 10-A',
+          'Class 10-B',
+          'Class 7-A',
+          'Class 7-B',
+        ]);
+
+  // Class Management State
+  const [newClassNameInput, setNewClassNameInput] = useState('');
+  const [isAddingClass, setIsAddingClass] = useState(false);
+  const [classToRename, setClassToRename] = useState(null);
+  const [renamedClassNameInput, setRenamedClassNameInput] = useState('');
+  const [isRenamingClass, setIsRenamingClass] = useState(false);
 
   // Fallback Faculty Roster to ensure dropdowns are never blank
   const DEFAULT_TEACHERS = [
-    { id: 't1', name: 'Mrs. Priya Sharma', email: 'priya@myschool.com', role: 'class_teacher', class_name: 'Class 8-A', subject: 'Mathematics' },
-    { id: 't2', name: 'Mr. Rajesh Patel', email: 'rajesh@myschool.com', role: 'subject_teacher', class_name: 'Class 8-A', subject: 'Science' },
-    { id: 't3', name: 'Mrs. Sunita Verma', email: 'sunita@myschool.com', role: 'subject_teacher', class_name: 'Class 8-A', subject: 'English' }
+    { id: 't1', name: 'Mrs. Priya Sharma', email: 'priya@myschool.com', role: 'class_teacher', class_name: 'Class 8-A (CT), Class 8-B, Class 9-A, Class 9-B', classTeacherOf: 'Class 8-A', classes: ['Class 8-A', 'Class 8-B', 'Class 9-A', 'Class 9-B'], subject: 'Mathematics' },
+    { id: 't2', name: 'Mr. Rajesh Patel', email: 'rajesh@myschool.com', role: 'class_teacher', class_name: 'Class 8-B (CT), Class 8-A, Class 9-A, Class 9-B', classTeacherOf: 'Class 8-B', classes: ['Class 8-A', 'Class 8-B', 'Class 9-A', 'Class 9-B'], subject: 'Science' },
+    { id: 't3', name: 'Mrs. Sunita Verma', email: 'sunita@myschool.com', role: 'subject_teacher', class_name: 'Class 8-A, Class 8-B, Class 9-A, Class 9-B', classTeacherOf: null, classes: ['Class 8-A', 'Class 8-B', 'Class 9-A', 'Class 9-B'], subject: 'English' }
   ];
+
+  // Normalization helpers for multi-class teaching & 1 class teacher per class rule
+  const getTeacherClasses = (t) => {
+    if (Array.isArray(t?.classes) && t.classes.length > 0) return t.classes;
+    if (typeof t?.class_name === 'string' && t.class_name) {
+      const parts = t.class_name
+        .split(',')
+        .map(c => c.replace(/\(CT\)/i, '').trim())
+        .filter(Boolean);
+      if (parts.length > 1) return parts;
+      if (parts.length === 1 && !['t1', 't2', 't3'].includes(t?.id)) return parts;
+    }
+    return ['Class 8-A', 'Class 8-B', 'Class 9-A', 'Class 9-B'];
+  };
+
+  const getTeacherClassTeacherOf = (t) => {
+    if (t?.classTeacherOf) return t.classTeacherOf;
+    if (t?.class_teacher_of) return t.class_teacher_of;
+    if (typeof t?.class_name === 'string' && t.class_name.includes('(CT)')) {
+      const match = t.class_name.match(/(.+?)\s*\(CT\)/i);
+      if (match) return match[1].trim();
+    }
+    if (t?.role === 'class_teacher') {
+      const list = getTeacherClasses(t);
+      return list[0] || 'Class 8-A';
+    }
+    return null;
+  };
 
   // Teachers State with localStorage cache & default fallback
   const [teachers, setTeachers] = useState(() => {
@@ -142,12 +206,17 @@ export default function AdminTab({
   const [teacherPassword, setTeacherPassword] = useState('');
   const [teacherRole, setTeacherRole] = useState('subject_teacher');
   const [isClassTeacherChecked, setIsClassTeacherChecked] = useState(false);
-  const [teacherClass, setTeacherClass] = useState(() => schoolClasses[0] || 'Class 8-A');
+  const [teacherClassTeacherOf, setTeacherClassTeacherOf] = useState(() => selectedClass || schoolClasses[0] || 'Class 8-A');
+  const [teacherAssignedClasses, setTeacherAssignedClasses] = useState(() => [selectedClass || schoolClasses[0] || 'Class 8-A']);
   const [teacherSubject, setTeacherSubject] = useState('Mathematics');
 
   // Confirmation Delete Modal
   const [teacherToDelete, setTeacherToDelete] = useState(null);
   const [studentToDelete, setStudentToDelete] = useState(null);
+  const [classToDelete, setClassToDelete] = useState(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [understandChecked, setUnderstandChecked] = useState(false);
+  const [isDeletingClass, setIsDeletingClass] = useState(false);
 
   // Student Modals
   const [isStudentModalOpen, setIsStudentModalOpen] = useState(false);
@@ -289,7 +358,9 @@ export default function AdminTab({
     setTeacherEmail('');
     setTeacherPassword('');
     setIsClassTeacherChecked(false);
-    setTeacherClass('Class 8-A');
+    const targetCls = selectedClassFilter !== 'all' ? selectedClassFilter : (selectedClass || 'Class 8-A');
+    setTeacherClassTeacherOf(targetCls);
+    setTeacherAssignedClasses([targetCls]);
     setTeacherSubject('Mathematics');
     setIsTeacherModalOpen(true);
   };
@@ -299,8 +370,17 @@ export default function AdminTab({
     setTeacherName(t.name);
     setTeacherEmail(t.email);
     setTeacherPassword(t.password || getFirstNamePassword(t.name));
-    setIsClassTeacherChecked(t.role === 'class_teacher' || (t.class_name && t.class_name !== 'All Classes'));
-    setTeacherClass(t.class_name && t.class_name !== 'All Classes' ? t.class_name : 'Class 8-A');
+
+    const ctClass = getTeacherClassTeacherOf(t);
+    const isCT = !!ctClass || t.role === 'class_teacher';
+    setIsClassTeacherChecked(isCT);
+    setTeacherClassTeacherOf(ctClass || selectedClass || 'Class 8-A');
+
+    let parsedClasses = getTeacherClasses(t);
+    if (isCT && ctClass && !parsedClasses.includes(ctClass)) {
+      parsedClasses = [ctClass, ...parsedClasses];
+    }
+    setTeacherAssignedClasses(parsedClasses.length > 0 ? parsedClasses : ['Class 8-A']);
     setTeacherSubject(t.subject || 'Mathematics');
     setIsTeacherModalOpen(true);
   };
@@ -308,37 +388,79 @@ export default function AdminTab({
   const handleSaveTeacher = async (e) => {
     e.preventDefault();
     const role = isClassTeacherChecked ? 'class_teacher' : 'subject_teacher';
-    const className = isClassTeacherChecked ? teacherClass : null;
+    const classTeacherOf = isClassTeacherChecked ? teacherClassTeacherOf : null;
+    let finalClasses = [...teacherAssignedClasses];
+    if (classTeacherOf && !finalClasses.includes(classTeacherOf)) {
+      finalClasses.push(classTeacherOf);
+    }
+    if (finalClasses.length === 0) {
+      finalClasses = [classTeacherOf || selectedClass || 'Class 8-A'];
+    }
+
+    // 1. Optimistic instant React state update
+    setTeachers(prev => {
+      const updated = prev.map(t => {
+        if (t.id === editingTeacher?.id) {
+          return {
+            ...t,
+            name: teacherName,
+            email: teacherEmail,
+            role,
+            classTeacherOf,
+            class_teacher_of: classTeacherOf,
+            classes: finalClasses,
+            class_name: classTeacherOf 
+              ? `${classTeacherOf} (CT), ${finalClasses.filter(c => c !== classTeacherOf).join(', ')}`
+              : finalClasses.join(', '),
+            subject: teacherSubject,
+            ...(teacherPassword ? { password: teacherPassword } : {})
+          };
+        }
+        // Enforce 1 Class Teacher per class: if another teacher was CT of this class, make them subject teacher
+        if (classTeacherOf && (getTeacherClassTeacherOf(t) === classTeacherOf)) {
+          const theirClasses = getTeacherClasses(t);
+          return {
+            ...t,
+            role: 'subject_teacher',
+            classTeacherOf: null,
+            class_teacher_of: null,
+            class_name: theirClasses.join(', ')
+          };
+        }
+        return t;
+      });
+      try {
+        localStorage.setItem('myschool_teachers_cache', JSON.stringify(updated));
+      } catch (err) {}
+      return updated;
+    });
 
     try {
+      const payload = {
+        action: editingTeacher ? 'admin_update_teacher' : 'admin_add_teacher',
+        id: editingTeacher?.id,
+        name: teacherName,
+        email: teacherEmail,
+        role,
+        classTeacherOf,
+        classes: finalClasses,
+        className: classTeacherOf || finalClasses[0],
+        subject: teacherSubject,
+        password: teacherPassword
+      };
+
       if (editingTeacher) {
         await fetch('/api/auth', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'admin_update_teacher',
-            id: editingTeacher.id,
-            name: teacherName,
-            email: teacherEmail,
-            role,
-            className,
-            subject: teacherSubject,
-            password: teacherPassword
-          })
+          body: JSON.stringify(payload)
         });
         showToast(`✅ Updated profile & credentials for ${teacherName}`);
       } else {
         const res = await fetch('/api/auth', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'admin_add_teacher',
-            name: teacherName,
-            email: teacherEmail,
-            role,
-            className,
-            subject: teacherSubject
-          })
+          body: JSON.stringify(payload)
         });
         const data = await res.json();
         showToast(`🎉 Added ${teacherName}! Default password: ${data.defaultPassword || 'firstname@123'}`);
@@ -799,6 +921,7 @@ export default function AdminTab({
     setSubjectLabelInput('');
     setSubjectMaxMarksInput(25);
     setSubjectTeacherInput('');
+    setSubjectClassesInput(academicClassFilter !== 'all' ? [academicClassFilter] : ['All Classes']);
     setIsSubjectModalOpen(true);
   };
 
@@ -811,6 +934,7 @@ export default function AdminTab({
       teachers.find(t => (t.subject || '').toLowerCase() === (sub.label || '').toLowerCase())?.name || 
       '';
     setSubjectTeacherInput(assigned);
+    setSubjectClassesInput(Array.isArray(sub.classes) && sub.classes.length > 0 ? sub.classes : ['All Classes']);
     setIsSubjectModalOpen(true);
   };
 
@@ -828,13 +952,16 @@ export default function AdminTab({
 
     const trimmedLabel = subjectLabelInput.trim();
     const assignedTeacher = subjectTeacherInput || null;
+    const classesToSave = Array.isArray(subjectClassesInput) && subjectClassesInput.length > 0 
+      ? subjectClassesInput 
+      : ['All Classes'];
 
     // 1. Instant optimistic UI update
     let updatedSubjects = [...(localConfig.subjects || [])];
     if (editingSubject) {
       updatedSubjects = updatedSubjects.map(s => 
         s.key === editingSubject.key 
-          ? { ...s, label: trimmedLabel, max: maxMarksNum, assignedTeacherName: assignedTeacher }
+          ? { ...s, label: trimmedLabel, max: maxMarksNum, assignedTeacherName: assignedTeacher, classes: classesToSave }
           : s
       );
     } else {
@@ -843,7 +970,8 @@ export default function AdminTab({
         key: newKey,
         label: trimmedLabel,
         max: maxMarksNum,
-        assignedTeacherName: assignedTeacher
+        assignedTeacherName: assignedTeacher,
+        classes: classesToSave
       });
     }
 
@@ -937,6 +1065,199 @@ export default function AdminTab({
       }
     } catch (err) {
       console.warn('Background sync for delete subject:', err);
+    }
+  };
+
+  // ---------------- Class Management Handlers ----------------
+  const handleAddClass = async (e) => {
+    e?.preventDefault();
+    const trimmed = newClassNameInput.trim();
+    if (!trimmed) return;
+    if (schoolClasses.some(c => c.toLowerCase() === trimmed.toLowerCase())) {
+      showToast('⚠️ This class already exists in the school.');
+      return;
+    }
+
+    setIsAddingClass(true);
+    try {
+      const updatedClasses = [...schoolClasses, trimmed];
+      const newConfig = { ...localConfig, classes: updatedClasses };
+      setLocalConfig(newConfig);
+      saveSchoolConfig(newConfig);
+      if (typeof onUpdateConfig === 'function') {
+        onUpdateConfig('save_all', { config: newConfig });
+      }
+
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add_class', className: trimmed })
+      });
+
+      setNewClassNameInput('');
+      showToast(`🎉 Added ${trimmed} to school classes!`);
+    } catch (err) {
+      showToast('⚠️ Error adding class');
+    } finally {
+      setIsAddingClass(false);
+    }
+  };
+
+  const handleOpenRenameClass = (cls) => {
+    setClassToRename(cls);
+    setRenamedClassNameInput(cls);
+  };
+
+  const handleConfirmRenameClass = async (e) => {
+    e?.preventDefault();
+    if (!classToRename) return;
+    const oldName = classToRename;
+    const newName = renamedClassNameInput.trim();
+
+    if (!newName) {
+      showToast('⚠️ Class name cannot be empty.');
+      return;
+    }
+
+    if (oldName.toLowerCase() === newName.toLowerCase() && oldName === newName) {
+      setClassToRename(null);
+      return;
+    }
+
+    if (oldName.toLowerCase() !== newName.toLowerCase() && schoolClasses.some(c => c.toLowerCase() === newName.toLowerCase())) {
+      showToast('⚠️ A class with this name already exists in the school.');
+      return;
+    }
+
+    setIsRenamingClass(true);
+    try {
+      // 1. Update school config classes list
+      const updatedClasses = schoolClasses.map(c => c === oldName ? newName : c);
+      let updatedSubjects = Array.isArray(localConfig.subjects) ? localConfig.subjects.map(s => {
+        if (Array.isArray(s.classes)) {
+          return { ...s, classes: s.classes.map(c => c === oldName ? newName : c) };
+        }
+        return s;
+      }) : [];
+
+      const newConfig = { 
+        ...localConfig, 
+        classes: updatedClasses,
+        defaultClass: localConfig.defaultClass === oldName ? newName : localConfig.defaultClass,
+        subjects: updatedSubjects
+      };
+      setLocalConfig(newConfig);
+      saveSchoolConfig(newConfig);
+      if (typeof onUpdateConfig === 'function') {
+        onUpdateConfig('save_all', { config: newConfig });
+      }
+
+      // 2. Update active class if needed
+      if (selectedClass === oldName && typeof onChangeClass === 'function') {
+        onChangeClass(newName);
+      }
+      if (selectedClassFilter === oldName) {
+        setSelectedClassFilter(newName);
+      }
+      if (academicClassFilter === oldName) {
+        setAcademicClassFilter(newName);
+      }
+
+      // 3. Update students belonging to this class
+      const updatedStudents = students.map(s => (s.className === oldName ? { ...s, className: newName } : s));
+      if (students.some(s => s.className === oldName)) {
+        await fetch('/api/students', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'bulk_replace', students: updatedStudents })
+        });
+        if (typeof onRefreshStudents === 'function') {
+          onRefreshStudents();
+        }
+      }
+
+      // 4. Update teachers assigned to this class
+      const updatedTeachers = teachers.map(t => {
+        let changed = false;
+        let newCT = t.classTeacherOf;
+        let newClasses = Array.isArray(t.classes) ? [...t.classes] : [];
+        let newClassName = t.class_name || '';
+
+        if (t.classTeacherOf === oldName) {
+          newCT = newName;
+          changed = true;
+        }
+        if (newClasses.includes(oldName)) {
+          newClasses = newClasses.map(c => c === oldName ? newName : c);
+          changed = true;
+        }
+        if (newClassName.includes(oldName)) {
+          newClassName = newClassName.replaceAll(oldName, newName);
+          changed = true;
+        }
+        return changed ? { ...t, classTeacherOf: newCT, classes: newClasses, class_name: newClassName } : t;
+      });
+      setTeachers(updatedTeachers);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('myschool_teachers_cache', JSON.stringify(updatedTeachers));
+      }
+
+      // 5. Sync to server config
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'rename_class', oldName, newName })
+      });
+
+      showToast(`✅ Successfully renamed "${oldName}" to "${newName}"!`);
+      setClassToRename(null);
+    } catch (err) {
+      console.error('Error renaming class:', err);
+      showToast('⚠️ Error renaming class');
+    } finally {
+      setIsRenamingClass(false);
+    }
+  };
+
+  const confirmDeleteClass = async () => {
+    if (!classToDelete) return;
+    if (schoolClasses.length <= 1) {
+      showToast('⚠️ At least one class must remain in the school.');
+      setClassToDelete(null);
+      return;
+    }
+
+    if (!understandChecked || deleteConfirmText.trim().toLowerCase() !== classToDelete.toLowerCase()) {
+      showToast('⚠️ Please complete both confirmation steps to delete this class.');
+      return;
+    }
+
+    setIsDeletingClass(true);
+    const targetClass = classToDelete;
+
+    try {
+      const updatedClasses = schoolClasses.filter(c => c !== targetClass);
+      const newConfig = { ...localConfig, classes: updatedClasses };
+      setLocalConfig(newConfig);
+      saveSchoolConfig(newConfig);
+      if (typeof onUpdateConfig === 'function') {
+        onUpdateConfig('save_all', { config: newConfig });
+      }
+
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete_class', className: targetClass })
+      });
+
+      showToast(`Permanently deleted ${targetClass}`);
+      setClassToDelete(null);
+      setDeleteConfirmText('');
+      setUnderstandChecked(false);
+    } catch (err) {
+      showToast('⚠️ Error removing class');
+    } finally {
+      setIsDeletingClass(false);
     }
   };
 
@@ -1054,8 +1375,13 @@ export default function AdminTab({
         <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden flex flex-col">
           <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <h3 className="text-base font-bold text-slate-800">Registered Faculty & Staff</h3>
-              <p className="text-xs text-slate-400">Click edit on any teacher to change their role, subject, or password.</p>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-slate-800">Registered Faculty & Staff</h3>
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                  {teachers.length} Teachers
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">Click edit on any teacher to change their role, subject, assigned classes, or password.</p>
             </div>
             <button
               onClick={handleOpenAddTeacher}
@@ -1090,59 +1416,75 @@ export default function AdminTab({
                     </td>
                   </tr>
                 ) : (
-                  teachers.map(t => (
-                  <tr key={t.id} className="hover:bg-slate-50/70 transition-colors">
-                    <td className="py-3.5 px-4 sm:px-6 font-bold text-slate-800 flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs shrink-0">
-                        {t.name.charAt(0)}
-                      </div>
-                      <div className="truncate max-w-[140px] sm:max-w-none">
-                        <p className="truncate whitespace-nowrap">{t.name}</p>
-                        <p className="text-[10px] text-slate-400 font-normal md:hidden">{t.email}</p>
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-3 sm:px-4 whitespace-nowrap">
-                      <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold border ${
-                        t.role === 'class_teacher' 
-                          ? 'bg-indigo-50 text-indigo-700 border-indigo-200' 
-                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      }`}>
-                        {t.role === 'class_teacher' ? 'Class Teacher' : 'Subject Teacher'}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-3 sm:px-4 font-semibold text-slate-600 whitespace-nowrap">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200/80 text-indigo-700 font-bold text-[11px] whitespace-nowrap shadow-2xs">
-                        {t.class_name || 'Class 8-A'}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-3 sm:px-4 font-semibold text-slate-600">
-                      {t.subject || 'General'}
-                    </td>
-                    <td className="py-3.5 px-3 sm:px-4 text-slate-500 font-mono text-[11px] hidden md:table-cell">
-                      {t.email}
-                    </td>
-                    <td className="py-3.5 px-4 sm:px-6 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => handleOpenEditTeacher(t)}
-                          className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 hover:bg-indigo-50 hover:border-indigo-300 text-slate-600 hover:text-indigo-600 transition-colors flex items-center gap-1 font-semibold text-xs"
-                          title="Edit Teacher Profile & Password"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">Edit</span>
-                        </button>
-                        <button
-                          onClick={() => setTeacherToDelete(t)}
-                          className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 hover:bg-rose-50 hover:border-rose-300 text-slate-500 hover:text-rose-600 transition-colors flex items-center gap-1 font-semibold text-xs"
-                          title="Remove Teacher"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          <span className="hidden sm:inline">Delete</span>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )))}
+                  teachers.map(t => {
+                    const activeCls = selectedClass || 'Class 8-A';
+                    const ctOf = getTeacherClassTeacherOf(t);
+                    const assignedList = getTeacherClasses(t);
+                    const isCtForActive = ctOf === activeCls;
+                    const teachesActive = assignedList.includes(activeCls);
+                    const displayedClass = teachesActive ? activeCls : (assignedList[0] || ctOf || activeCls);
+                    const otherCount = assignedList.filter(c => c !== displayedClass).length;
+
+                    return (
+                      <tr key={t.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="py-3.5 px-4 sm:px-6 font-bold text-slate-800 flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-xl bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs shrink-0">
+                            {t.name.charAt(0)}
+                          </div>
+                          <div className="truncate max-w-[140px] sm:max-w-none">
+                            <p className="truncate whitespace-nowrap">{t.name}</p>
+                            <p className="text-[10px] text-slate-400 font-normal md:hidden">{t.email}</p>
+                          </div>
+                        </td>
+                        <td className="py-3.5 px-3 sm:px-4 whitespace-nowrap">
+                          <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                            isCtForActive
+                              ? 'bg-indigo-50 text-indigo-700 border-indigo-200' 
+                              : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          }`}>
+                            {isCtForActive ? 'Class Teacher' : 'Subject Teacher'}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-3 sm:px-4 font-semibold text-slate-600 whitespace-nowrap">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-indigo-50 border border-indigo-200/80 text-indigo-700 font-bold text-[11px] whitespace-nowrap shadow-2xs">
+                            {displayedClass}
+                            {otherCount > 0 && (
+                              <span className="text-[10px] font-medium text-indigo-500/80 ml-1">
+                                (+{otherCount})
+                              </span>
+                            )}
+                          </span>
+                        </td>
+                        <td className="py-3.5 px-3 sm:px-4 font-semibold text-slate-600">
+                          {t.subject || 'General'}
+                        </td>
+                        <td className="py-3.5 px-3 sm:px-4 text-slate-500 font-mono text-[11px] hidden md:table-cell">
+                          {t.email}
+                        </td>
+                        <td className="py-3.5 px-4 sm:px-6 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => handleOpenEditTeacher(t)}
+                              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 hover:bg-indigo-50 hover:border-indigo-300 text-slate-600 hover:text-indigo-600 transition-colors flex items-center gap-1 font-semibold text-xs"
+                              title="Edit Teacher Profile & Password"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Edit</span>
+                            </button>
+                            <button
+                              onClick={() => setTeacherToDelete(t)}
+                              className="p-2 sm:px-2.5 sm:py-1.5 rounded-xl border border-slate-200 hover:bg-rose-50 hover:border-rose-300 text-slate-500 hover:text-rose-600 transition-colors flex items-center gap-1 font-semibold text-xs"
+                              title="Remove Teacher"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Delete</span>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -1216,7 +1558,7 @@ export default function AdminTab({
             </span>
 
             <button
-              onClick={() => setSelectedClassFilter('all')}
+              onClick={() => handleSelectClassFilter('all')}
               className={`px-3 py-1 rounded-xl text-xs font-bold shrink-0 transition-all ${
                 selectedClassFilter === 'all'
                   ? 'bg-indigo-600 text-white shadow-xs'
@@ -1232,7 +1574,7 @@ export default function AdminTab({
               return (
                 <button
                   key={c}
-                  onClick={() => setSelectedClassFilter(c)}
+                  onClick={() => handleSelectClassFilter(c)}
                   className={`px-3 py-1 rounded-xl text-xs font-semibold shrink-0 transition-all ${
                     isSelected
                       ? 'bg-indigo-600 text-white font-bold shadow-xs'
@@ -1615,6 +1957,36 @@ export default function AdminTab({
               </button>
             </div>
 
+            {/* Filter by Class for Academics Subjects */}
+            <div className="px-4 sm:px-5 py-3 bg-slate-50/60 border-b border-slate-100 flex items-center gap-2 overflow-x-auto">
+              <span className="text-xs font-bold text-slate-500 shrink-0">Class Scope:</span>
+              <button
+                type="button"
+                onClick={() => setAcademicClassFilter('all')}
+                className={`px-3 py-1 rounded-xl text-xs font-bold border transition-all shrink-0 cursor-pointer ${
+                  academicClassFilter === 'all'
+                    ? 'bg-[#171340] text-white border-[#171340] shadow-2xs'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                All Classes
+              </button>
+              {schoolClasses.map(cls => (
+                <button
+                  type="button"
+                  key={cls}
+                  onClick={() => setAcademicClassFilter(cls)}
+                  className={`px-3 py-1 rounded-xl text-xs font-bold border transition-all shrink-0 cursor-pointer ${
+                    academicClassFilter === cls
+                      ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  {cls}
+                </button>
+              ))}
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse min-w-[560px]">
                 <thead>
@@ -1626,22 +1998,39 @@ export default function AdminTab({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs font-medium">
-                  {(localConfig.subjects || []).map((sub) => {
-                    const assignedTeacher = teachers.find(t => t.name === sub.assignedTeacherName) || 
-                                           teachers.find(t => (t.subject || '').toLowerCase() === sub.label.toLowerCase());
-                    return (
-                      <tr key={sub.key} className="hover:bg-slate-50/70 transition-colors">
-                        <td className="py-3 px-4 sm:px-6">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 font-bold text-xs">
-                              {sub.label.charAt(0)}
+                  {(localConfig.subjects || [])
+                    .filter(sub => {
+                      if (academicClassFilter === 'all') return true;
+                      if (!sub.classes || sub.classes.length === 0 || sub.classes.includes('All Classes')) return true;
+                      return sub.classes.includes(academicClassFilter);
+                    })
+                    .map((sub) => {
+                      const assignedTeacher = teachers.find(t => t.name === sub.assignedTeacherName) || 
+                                             teachers.find(t => (t.subject || '').toLowerCase() === sub.label.toLowerCase());
+                      return (
+                        <tr key={sub.key} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="py-3 px-4 sm:px-6">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 font-bold text-xs">
+                                {sub.label.charAt(0)}
+                              </div>
+                              <div>
+                                <span className="font-bold text-slate-800 text-sm">{sub.label}</span>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <p className="text-[10px] text-slate-400 font-mono">key: {sub.key}</p>
+                                  {sub.classes && !sub.classes.includes('All Classes') ? (
+                                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                      {sub.classes.join(', ')}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-md bg-slate-100 text-slate-500 border border-slate-200">
+                                      All Classes
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
                             </div>
-                            <div>
-                              <span className="font-bold text-slate-800 text-sm">{sub.label}</span>
-                              <p className="text-[10px] text-slate-400 font-mono">key: {sub.key}</p>
-                            </div>
-                          </div>
-                        </td>
+                          </td>
                         <td className="py-3 px-4 text-center">
                           <span className="inline-flex items-center px-3 py-1 rounded-full bg-slate-100 font-bold text-slate-700 border border-slate-200">
                             {sub.max || 25} Marks
@@ -1687,6 +2076,100 @@ export default function AdminTab({
                   })}
                 </tbody>
               </table>
+            </div>
+          </div>
+
+          {/* CARD 3: SCHOOL CLASSES & GRADE DIVISIONS */}
+          <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden flex flex-col">
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-800">School Classes & Grade Divisions</h3>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    {schoolClasses.length} Active Classes
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Add, remove, or customize classes (e.g. Class 1-A, Grade 6-B, Class 11-Science) for your school.
+                </p>
+              </div>
+
+              {/* Quick Add Class Form */}
+              <form onSubmit={handleAddClass} className="flex items-center gap-2 w-full sm:w-auto">
+                <input
+                  type="text"
+                  placeholder="e.g. Class 6-A or Grade 11-A"
+                  value={newClassNameInput}
+                  onChange={(e) => setNewClassNameInput(e.target.value)}
+                  className="w-full sm:w-48 text-xs px-3 py-2 rounded-xl border border-slate-200 font-medium focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!newClassNameInput.trim() || isAddingClass}
+                  className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs shadow-xs transition-all shrink-0 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Add Class</span>
+                </button>
+              </form>
+            </div>
+
+            <div className="p-4 sm:p-5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {schoolClasses.map(cls => {
+                const studentCount = students.filter(s => (s.className || 'Class 8-A') === cls).length;
+                const ct = teachers.find(t => getTeacherClassTeacherOf(t) === cls);
+
+                return (
+                  <div 
+                    key={cls}
+                    className="p-3.5 rounded-2xl border border-slate-200/80 bg-slate-50/60 hover:bg-white hover:border-indigo-200 hover:shadow-xs transition-all flex flex-col justify-between gap-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="font-bold text-slate-800 text-sm block">{cls}</span>
+                        <span className="text-[10px] text-slate-500">
+                          {studentCount} {studentCount === 1 ? 'Student' : 'Students'} Enrolled
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenRenameClass(cls)}
+                          className="w-7 h-7 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 flex items-center justify-center transition-colors cursor-pointer"
+                          title={`Rename ${cls}`}
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        {schoolClasses.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setClassToDelete(cls);
+                              setDeleteConfirmText('');
+                              setUnderstandChecked(false);
+                            }}
+                            className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors cursor-pointer"
+                            title={`Permanently delete ${cls}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400 text-[10px]">Class Teacher:</span>
+                      {ct ? (
+                        <span className="font-bold text-indigo-700 truncate max-w-[120px]" title={ct.name}>
+                          {ct.name}
+                        </span>
+                      ) : (
+                        <span className="text-amber-600 font-medium text-[10px]">Not Appointed</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -1752,30 +2235,42 @@ export default function AdminTab({
                 </div>
               </div>
 
-              {/* Dual Role: Class Teacher Toggle Checkbox */}
+              {/* Dual Role: Class Teacher Designation */}
               <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col gap-2.5">
                 <label className="flex items-center gap-2.5 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={isClassTeacherChecked}
-                    onChange={(e) => setIsClassTeacherChecked(e.target.checked)}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setIsClassTeacherChecked(checked);
+                      if (checked && !teacherAssignedClasses.includes(teacherClassTeacherOf)) {
+                        setTeacherAssignedClasses([...teacherAssignedClasses, teacherClassTeacherOf]);
+                      }
+                    }}
                     className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                   />
                   <div className="flex flex-col">
                     <span className="text-xs font-bold text-slate-800">Appointed as Class Teacher</span>
-                    <span className="text-[10px] text-slate-400">Can take attendance & issue report cards for this class</span>
+                    <span className="text-[10px] text-slate-400">(1 Class Teacher per class only)</span>
                   </div>
                 </label>
 
                 {isClassTeacherChecked && (
                   <div className="pt-2 border-t border-slate-200/60 animate-in fade-in duration-150">
-                    <label className="text-[11px] font-semibold text-indigo-900 block mb-1">
+                    <label className="text-[11px] font-semibold text-slate-700 block mb-1">
                       Assigned Class:
                     </label>
                     <div className="relative">
                       <select
-                        value={teacherClass}
-                        onChange={(e) => setTeacherClass(e.target.value)}
+                        value={teacherClassTeacherOf}
+                        onChange={(e) => {
+                          const newCtClass = e.target.value;
+                          setTeacherClassTeacherOf(newCtClass);
+                          if (!teacherAssignedClasses.includes(newCtClass)) {
+                            setTeacherAssignedClasses([...teacherAssignedClasses, newCtClass]);
+                          }
+                        }}
                         className="w-full text-xs px-3 py-2 rounded-xl border border-indigo-200 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold text-indigo-950 appearance-none pr-8 cursor-pointer"
                       >
                         {schoolClasses.map(c => (
@@ -1786,6 +2281,69 @@ export default function AdminTab({
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Multi-Class Assignment: A Teacher Can Teach Multiple Classes */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-bold text-slate-800">Assigned Teaching Classes</label>
+                    <p className="text-[10px] text-slate-400">Select all classes where this teacher teaches subjects:</p>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => setTeacherAssignedClasses([...schoolClasses])}
+                      className="text-indigo-600 hover:underline font-semibold"
+                    >
+                      All
+                    </button>
+                    <span className="text-slate-300">&bull;</span>
+                    <button
+                      type="button"
+                      onClick={() => setTeacherAssignedClasses(isClassTeacherChecked ? [teacherClassTeacherOf] : [schoolClasses[0]])}
+                      className="text-slate-500 hover:underline font-semibold"
+                    >
+                      Reset
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  {schoolClasses.map(cls => {
+                    const isSelected = teacherAssignedClasses.includes(cls);
+                    const isHomeroom = isClassTeacherChecked && teacherClassTeacherOf === cls;
+                    return (
+                      <button
+                        type="button"
+                        key={cls}
+                        onClick={() => {
+                          if (isHomeroom) return; // Cannot uncheck homeroom class
+                          if (isSelected) {
+                            if (teacherAssignedClasses.length <= 1) return; // keep at least 1 class
+                            setTeacherAssignedClasses(teacherAssignedClasses.filter(c => c !== cls));
+                          } else {
+                            setTeacherAssignedClasses([...teacherAssignedClasses, cls]);
+                          }
+                        }}
+                        className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold border transition-all text-left ${
+                          isHomeroom
+                            ? 'bg-indigo-100/80 border-indigo-300 text-indigo-900 cursor-default'
+                            : isSelected
+                            ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <span className="truncate">{cls}</span>
+                        {isHomeroom ? (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-indigo-200 text-indigo-800 shrink-0">CT</span>
+                        ) : isSelected ? (
+                          <Check className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Password field directly in editing form */}
@@ -2412,6 +2970,56 @@ export default function AdminTab({
                 </p>
               </div>
 
+              <div>
+                <label className="text-xs font-semibold text-slate-600 block mb-1">Applicable Classes</label>
+                <div className="flex items-center gap-1.5 flex-wrap p-2.5 rounded-xl border border-slate-200 bg-slate-50/70">
+                  <button
+                    type="button"
+                    onClick={() => setSubjectClassesInput(['All Classes'])}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                      subjectClassesInput.includes('All Classes')
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    All Classes
+                  </button>
+                  {schoolClasses.map(cls => {
+                    const isSelected = !subjectClassesInput.includes('All Classes') && subjectClassesInput.includes(cls);
+                    return (
+                      <button
+                        type="button"
+                        key={cls}
+                        onClick={() => {
+                          if (subjectClassesInput.includes('All Classes')) {
+                            setSubjectClassesInput([cls]);
+                          } else {
+                            if (subjectClassesInput.includes(cls)) {
+                              const next = subjectClassesInput.filter(c => c !== cls);
+                              setSubjectClassesInput(next.length > 0 ? next : ['All Classes']);
+                            } else {
+                              setSubjectClassesInput([...subjectClassesInput, cls]);
+                            }
+                          }
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {cls}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  {subjectClassesInput.includes('All Classes') 
+                    ? 'Active for all classes in school and available in all class timetables.'
+                    : `Active exclusively in timetable & marksheets for: ${subjectClassesInput.join(', ')}`}
+                </p>
+              </div>
+
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
@@ -2453,18 +3061,198 @@ export default function AdminTab({
               <button
                 type="button"
                 onClick={() => setSubjectToDelete(null)}
-                className="py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                className="py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={handleDeleteSubject}
-                className="py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-200"
+                className="py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-md shadow-rose-200 cursor-pointer"
               >
                 Delete Subject
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: HIGH-SECURITY 2-STEP CONFIRM DELETE CLASS           */}
+      {/* ========================================================= */}
+      {classToDelete && (() => {
+        const enrolledCount = students.filter(s => (s.className || 'Class 8-A') === classToDelete).length;
+        const isMatches = deleteConfirmText.trim().toLowerCase() === classToDelete.toLowerCase();
+        const canDelete = understandChecked && isMatches && !isDeletingClass;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+            <div className="bg-white w-full max-w-md rounded-3xl p-6 sm:p-7 shadow-2xl border border-rose-100 flex flex-col gap-4">
+              
+              {/* Header */}
+              <div className="flex items-start gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 shrink-0 flex items-center justify-center shadow-xs">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h4 className="text-base font-black text-slate-900 tracking-tight">
+                    Delete {classToDelete}?
+                  </h4>
+                  <p className="text-xs text-rose-600 font-semibold mt-0.5">
+                    Critical destructive action &bull; Permanent removal
+                  </p>
+                </div>
+              </div>
+
+              {/* Warning Notice Box */}
+              <div className="bg-rose-50/70 border border-rose-200/80 rounded-2xl p-3.5 text-xs text-rose-950 flex flex-col gap-2">
+                <p className="font-bold">
+                  Deleting <span className="underline font-black">{classToDelete}</span> will result in:
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-[11px] text-rose-900">
+                  <li>
+                    {enrolledCount > 0 ? (
+                      <span className="font-bold text-rose-700">
+                        {enrolledCount} enrolled student{enrolledCount > 1 ? 's' : ''} will have their assigned class unlinked.
+                      </span>
+                    ) : (
+                      <span>All class rosters, student groups, and attendance records for this section will be removed.</span>
+                    )}
+                  </li>
+                  <li>Assigned Class Teacher designation for this section will be revoked.</li>
+                  <li>The class timetable schedule and period assignments will be permanently deleted.</li>
+                </ul>
+              </div>
+
+              {/* Step 1: Confirmation Checkbox */}
+              <div className="pt-1">
+                <label className="flex items-start gap-2.5 p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100/70 cursor-pointer select-none transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={understandChecked}
+                    onChange={(e) => setUnderstandChecked(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded text-rose-600 focus:ring-rose-500 border-slate-300 cursor-pointer"
+                  />
+                  <span className="text-xs text-slate-700 font-bold leading-snug">
+                    I understand that deleting this class cannot be undone and will erase all class data.
+                  </span>
+                </label>
+              </div>
+
+              {/* Step 2: Verification Input */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-bold text-slate-700">
+                  To confirm, type <span className="font-black text-rose-600 select-all font-mono px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200">{classToDelete}</span> below:
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  placeholder={`Type "${classToDelete}" to confirm`}
+                  className={`w-full px-3.5 py-2 text-xs font-mono font-bold rounded-xl border transition-all focus:outline-none ${
+                    isMatches 
+                      ? 'border-rose-400 bg-rose-50/40 text-rose-950 focus:ring-2 focus:ring-rose-500' 
+                      : 'border-slate-200 bg-white text-slate-800 focus:ring-2 focus:ring-indigo-500'
+                  }`}
+                  autoFocus
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClassToDelete(null);
+                    setDeleteConfirmText('');
+                    setUnderstandChecked(false);
+                  }}
+                  disabled={isDeletingClass}
+                  className="py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmDeleteClass}
+                  disabled={!canDelete}
+                  className={`py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all ${
+                    canDelete
+                      ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-md shadow-rose-600/25 cursor-pointer'
+                      : 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
+                  }`}
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>{isDeletingClass ? 'Deleting...' : 'Permanently Delete'}</span>
+                </button>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ========================================================= */}
+      {/* MODAL: RENAME CLASS                                       */}
+      {/* ========================================================= */}
+      {classToRename && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-slate-100 flex flex-col gap-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-xs">
+                  <Edit3 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">Rename Class</h3>
+                  <p className="text-[10px] text-slate-400">Current: {classToRename}</p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setClassToRename(null)}
+                className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmRenameClass} className="flex flex-col gap-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-600">New Class Name</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Grade 8-A or Class 9-Blue"
+                  value={renamedClassNameInput}
+                  onChange={(e) => setRenamedClassNameInput(e.target.value)}
+                  className="w-full text-xs px-3 py-2.5 rounded-xl border border-slate-200 mt-1 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-bold text-slate-800"
+                  autoFocus
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Renaming will automatically update all enrolled students, assigned teachers, curriculum subjects, and timetables.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setClassToRename(null)}
+                  disabled={isRenamingClass}
+                  className="px-3.5 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!renamedClassNameInput.trim() || isRenamingClass}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold shadow-md shadow-indigo-100 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isRenamingClass ? 'Renaming...' : 'Save Class Name'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

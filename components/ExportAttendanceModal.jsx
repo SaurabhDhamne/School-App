@@ -55,8 +55,6 @@ export default function ExportAttendanceModal({
   const [endDate, setEndDate] = useState(() => activeDate);
   const [customWorkingDaysOnly, setCustomWorkingDaysOnly] = useState(true);
 
-  if (!isOpen) return null;
-
   // Retrieve attendance status for a given student & date
   const getStatus = (rollNo, dateStr) => {
     // 1. Check persistent history for this exact date
@@ -261,6 +259,8 @@ export default function ExportAttendanceModal({
     onExportToast?.(`📊 Exported CSV register: ${filename}`);
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">

@@ -16,6 +16,7 @@ import AuthModal from '@/components/AuthModal';
 import ProfileModal from '@/components/ProfileModal';
 import HomeworkSection from '@/components/HomeworkSection';
 import ParentPortalView from '@/components/ParentPortalView';
+import { Mail, Send, AlertTriangle, FileSpreadsheet, CheckCircle2, X, AlertCircle, Upload } from 'lucide-react';
 import { getSchoolConfig, saveSchoolConfig, DEFAULT_SCHOOL_CONFIG } from '@/lib/schoolConfig';
 import { getLocalCustomHolidays, saveLocalCustomHolidays, isSchoolHoliday } from '@/lib/holidays';
 
@@ -86,10 +87,21 @@ export default function App() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [selectedStudentDetail, setSelectedStudentDetail] = useState(null);
   const [emailModalData, setEmailModalData] = useState(null);
+  const [broadcastConfirmData, setBroadcastConfirmData] = useState(null);
+  const [pendingExcelImport, setPendingExcelImport] = useState(null);
 
   // Notifications
   const [toastMessage, setToastMessage] = useState(null);
   const fileInputRef = useRef(null);
+  const [adminInitialSubTab, setAdminInitialSubTab] = useState('teachers');
+
+  const handleNavigateToAcademics = (targetClass) => {
+    if (targetClass) {
+      setSelectedClass(targetClass);
+    }
+    setAdminInitialSubTab('academics');
+    setActiveTab('admin');
+  };
 
   // Dynamic Configured Subjects from schoolConfig
   const configuredSubjects = useMemo(() => {
@@ -245,7 +257,7 @@ export default function App() {
 
   // Universal Mobile Back Button: Intercept Android/browser back button to dismiss open modal instead of closing app
   useEffect(() => {
-    const isModalOpen = isAuthModalOpen || isProfileModalOpen || isExportModalOpen || !!selectedStudentDetail || !!emailModalData;
+    const isModalOpen = isAuthModalOpen || isProfileModalOpen || isExportModalOpen || !!selectedStudentDetail || !!emailModalData || !!broadcastConfirmData || !!pendingExcelImport;
     if (isModalOpen) {
       window.history.pushState({ appModalOpen: true }, '');
       const handleBack = () => {
@@ -254,13 +266,15 @@ export default function App() {
         setIsExportModalOpen(false);
         setSelectedStudentDetail(null);
         setEmailModalData(null);
+        setBroadcastConfirmData(null);
+        setPendingExcelImport(null);
       };
       window.addEventListener('popstate', handleBack);
       return () => {
         window.removeEventListener('popstate', handleBack);
       };
     }
-  }, [isAuthModalOpen, isProfileModalOpen, isExportModalOpen, selectedStudentDetail, emailModalData]);
+  }, [isAuthModalOpen, isProfileModalOpen, isExportModalOpen, selectedStudentDetail, emailModalData, broadcastConfirmData, pendingExcelImport]);
 
   // Dual Persistence: State + LocalStorage Cache
   const updateAndPersistStudents = (newStudentsOrFn) => {
@@ -676,14 +690,13 @@ export default function App() {
           };
         });
 
-        updateAndPersistStudents(imported);
-        await fetch('/api/students', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'bulk_replace', students: imported })
+        // Instead of directly overwriting, require user confirmation
+        setPendingExcelImport({
+          imported,
+          fileName: file.name,
+          count: imported.length,
+          targetClass: selectedClass || 'Class 8-A'
         });
-
-        showToast(`✅ Successfully matched and imported ${imported.length} student marks!`);
       } catch (err) {
         console.error('Excel parse error:', err);
         showToast("⚠️ Failed to parse Excel file. Please use the template.");
@@ -691,6 +704,29 @@ export default function App() {
     };
     reader.readAsArrayBuffer(file);
     e.target.value = '';
+  };
+
+  const handleConfirmExcelImport = async () => {
+    if (!pendingExcelImport) return;
+    try {
+      const { imported, count, targetClass } = pendingExcelImport;
+      updateAndPersistStudents(imported);
+      await fetch('/api/students', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'bulk_replace', students: imported })
+      });
+      showToast(`✅ Successfully matched and imported marks for ${count} students in ${targetClass}!`);
+    } catch (err) {
+      console.error('Failed to persist imported students:', err);
+      showToast('⚠️ Error saving imported marks to server.');
+    } finally {
+      setPendingExcelImport(null);
+    }
+  };
+
+  const handleCancelExcelImport = () => {
+    setPendingExcelImport(null);
   };
 
   // Single Email Composer
@@ -733,27 +769,74 @@ export default function App() {
     setEmailModalData(null);
   };
 
-  // Bulk Email Dispatch
+  // Bulk Email Dispatch with Mandatory Confirmation Modal
   const handleOpenEmailAll = (type, targetDate) => {
     if (currentUser?.role === 'subject_teacher') {
-      showToast('🔒 Only Class Teacher can send bulk final report cards.');
+      showToast('🔒 Only Class Teacher or Admin can send bulk reports.');
       return;
     }
 
     if (type === 'marksheet') {
-      setStudents(prev => prev.map(s => ({ ...s, emailed: true })));
-      showToast('📧 Multi-subject report cards dispatched to all parents!');
+      const targetPool = classStudents.length > 0 ? classStudents : students;
+      if (targetPool.length === 0) {
+        showToast(`⚠️ No students enrolled in ${selectedClass} to email.`);
+        return;
+      }
+      setBroadcastConfirmData({
+        type: 'marksheet',
+        title: 'Broadcast Parent Report Cards',
+        targetClass: selectedClass,
+        recipientCount: targetPool.length,
+        examName: schoolConfig?.activeExam || 'Unit Test 1',
+        description: `You are about to dispatch official ${schoolConfig?.activeExam || 'Unit Test 1'} report cards to parents of all ${targetPool.length} students in ${selectedClass}.`,
+        impactNote: 'Each parent will receive an email containing their child\'s subject-wise marks, total score, percentage, and overall grade ranking.',
+        actionLabel: `Confirm & Broadcast (${targetPool.length} Reports)`
+      });
     } else {
       const activeD = targetDate || selectedAttendanceDate || new Date().toISOString().split('T')[0];
       const todayStr = new Date().toISOString().split('T')[0];
-      const absentees = students.filter(s => {
+      const targetPool = classStudents.length > 0 ? classStudents : students;
+      const absentees = targetPool.filter(s => {
         const status = attendanceHistory[activeD]?.[s.rollNo] !== undefined 
           ? attendanceHistory[activeD][s.rollNo]
           : (activeD === todayStr ? (s.attendance || 'P') : 'P');
         return status === 'A';
       });
-      showToast(`📧 Absence alert emails sent to ${absentees.length} parents for ${activeD}!`);
+
+      if (absentees.length === 0) {
+        showToast(`ℹ️ No absent students marked in ${selectedClass} for ${activeD}.`);
+        return;
+      }
+
+      setBroadcastConfirmData({
+        type: 'attendance',
+        title: 'Broadcast Daily Absence Alerts',
+        targetClass: selectedClass,
+        targetDate: activeD,
+        recipientCount: absentees.length,
+        description: `You are about to dispatch instant absence alert emails to parents of ${absentees.length} absent students in ${selectedClass} for ${activeD}.`,
+        impactNote: 'Alert emails will be dispatched immediately to notify parents of unexcused absence.',
+        actionLabel: `Confirm & Send ${absentees.length} Alerts`
+      });
     }
+  };
+
+  const handleExecuteBroadcast = () => {
+    if (!broadcastConfirmData) return;
+    const { type, recipientCount, targetClass, targetDate } = broadcastConfirmData;
+    
+    if (type === 'marksheet') {
+      setStudents(prev => prev.map(s => {
+        if (!s.className || s.className === targetClass || (targetClass === 'Class 8-A' && !s.className)) {
+          return { ...s, emailed: true };
+        }
+        return s;
+      }));
+      showToast(`📧 Successfully broadcasted report cards to ${recipientCount} parents in ${targetClass}!`);
+    } else {
+      showToast(`📧 Absence alert emails sent to ${recipientCount} parents for ${targetDate}!`);
+    }
+    setBroadcastConfirmData(null);
   };
 
   // ==============================================================
@@ -846,6 +929,7 @@ export default function App() {
             calculatePercentage={calculateStudentPercentage}
             getGrade={getStudentGrade}
             showToast={showToast}
+            onNavigateToAcademics={handleNavigateToAcademics}
           />
         )}
 
@@ -893,8 +977,10 @@ export default function App() {
           <HomeworkSection 
             currentUser={effectiveUser} 
             selectedClass={selectedClass}
+            students={classStudents}
             showToast={showToast} 
             isFullPage={true} 
+            onNavigateToAcademics={handleNavigateToAcademics}
           />
         )}
 
@@ -908,6 +994,9 @@ export default function App() {
             onRefreshHolidays={(hols) => setCustomHolidays(hols)}
             schoolConfig={schoolConfig}
             onUpdateConfig={handleUpdateConfig}
+            selectedClass={selectedClass}
+            onChangeClass={setSelectedClass}
+            initialSubTab={adminInitialSubTab}
           />
         )}
       </main>
@@ -972,6 +1061,182 @@ export default function App() {
         data={emailModalData}
         onConfirmSend={handleConfirmSendEmail}
       />
+
+      {/* BULK BROADCAST CONFIRMATION MODAL */}
+      {broadcastConfirmData && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          style={{ zIndex: 60 }}
+        >
+          <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xl max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="p-6 border-b border-slate-100 flex items-start justify-between bg-gradient-to-r from-slate-50 to-indigo-50/30">
+              <div className="flex items-center gap-3">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+                  broadcastConfirmData.type === 'marksheet' 
+                    ? 'bg-amber-100 text-amber-700 shadow-sm' 
+                    : 'bg-rose-100 text-rose-700 shadow-sm'
+                }`}>
+                  {broadcastConfirmData.type === 'marksheet' ? <Mail className="w-6 h-6" /> : <AlertTriangle className="w-6 h-6" />}
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">{broadcastConfirmData.title}</h3>
+                  <p className="text-xs text-slate-500 font-medium">Please confirm before sending bulk parent communications</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setBroadcastConfirmData(null)}
+                className="w-8 h-8 rounded-full hover:bg-slate-200 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4">
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200/80 space-y-2">
+                <div className="flex items-center justify-between text-xs font-semibold">
+                  <span className="text-slate-500">Target Class:</span>
+                  <span className="font-bold text-slate-900 px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    {broadcastConfirmData.targetClass}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs font-semibold">
+                  <span className="text-slate-500">Recipients Count:</span>
+                  <span className="font-bold text-slate-900">
+                    {broadcastConfirmData.recipientCount} Parents
+                  </span>
+                </div>
+                {broadcastConfirmData.examName && (
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="text-slate-500">Academic Exam:</span>
+                    <span className="font-bold text-slate-900">{broadcastConfirmData.examName}</span>
+                  </div>
+                )}
+                {broadcastConfirmData.targetDate && (
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="text-slate-500">Attendance Date:</span>
+                    <span className="font-bold text-slate-900">{broadcastConfirmData.targetDate}</span>
+                  </div>
+                )}
+              </div>
+
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {broadcastConfirmData.description}
+              </p>
+
+              {broadcastConfirmData.impactNote && (
+                <div className="p-3 bg-amber-50/70 border border-amber-200/70 rounded-xl flex items-start gap-2.5 text-[11px] text-amber-800">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <span>{broadcastConfirmData.impactNote}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer Actions */}
+            <div className="p-6 bg-slate-50/80 border-t border-slate-100 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setBroadcastConfirmData(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteBroadcast}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs text-white shadow-md transition-all cursor-pointer ${
+                  broadcastConfirmData.type === 'marksheet'
+                    ? 'bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800 shadow-amber-200'
+                    : 'bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-700 hover:to-rose-800 shadow-rose-200'
+                }`}
+              >
+                <Send className="w-4 h-4" />
+                <span>{broadcastConfirmData.actionLabel || 'Confirm & Send Broadcast'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXCEL IMPORT CONFIRMATION MODAL */}
+      {pendingExcelImport && (
+        <div 
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          style={{ zIndex: 60 }}
+        >
+          <div className="bg-white rounded-3xl border border-slate-200/90 shadow-2xl max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="p-6 border-b border-slate-100 flex items-start justify-between bg-gradient-to-r from-slate-50 to-emerald-50/30">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shadow-sm">
+                  <FileSpreadsheet className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">Confirm Marksheet Excel Import</h3>
+                  <p className="text-xs text-slate-500 font-medium">Verify file before updating database marks</p>
+                </div>
+              </div>
+              <button 
+                onClick={handleCancelExcelImport}
+                className="w-8 h-8 rounded-full hover:bg-slate-200 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4">
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200/80 space-y-2">
+                <div className="flex items-center justify-between text-xs font-semibold">
+                  <span className="text-slate-500">File Name:</span>
+                  <span className="font-bold text-slate-900 truncate max-w-[220px]" title={pendingExcelImport.fileName}>
+                    {pendingExcelImport.fileName}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs font-semibold">
+                  <span className="text-slate-500">Target Class:</span>
+                  <span className="font-bold text-slate-900 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    {pendingExcelImport.targetClass}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs font-semibold">
+                  <span className="text-slate-500">Records Matched:</span>
+                  <span className="font-bold text-emerald-700">
+                    {pendingExcelImport.count} Students
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-amber-50/70 border border-amber-200/70 rounded-xl flex items-start gap-2.5 text-[11px] text-amber-800">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span>
+                  Confirming this import will update and overwrite existing marks for the matched students in {pendingExcelImport.targetClass}.
+                </span>
+              </div>
+            </div>
+
+            {/* Modal Footer Actions */}
+            <div className="p-6 bg-slate-50/80 border-t border-slate-100 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleCancelExcelImport}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmExcelImport}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800 text-white font-bold text-xs shadow-md shadow-emerald-200 transition-all cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Confirm & Apply Marks</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

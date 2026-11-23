@@ -1,0 +1,1062 @@
+{
+  "periods": [
+    {
+      "id": "p1",
+      "type": "period",
+      "number": 1,
+      "label": "Lecture 1",
+      "time": "08:00 - 08:45",
+      "startTime": "08:00",
+      "endTime": "08:45",
+      "duration": "45m"
+    },
+    {
+      "id": "p2",
+      "type": "period",
+      "number": 2,
+      "label": "Lecture 2",
+      "time": "08:45 - 09:30",
+      "startTime": "08:45",
+      "endTime": "09:30",
+      "duration": "45m"
+    },
+    {
+      "id": "b1",
+      "type": "break",
+      "label": "Short Break",
+      "time": "09:30 - 09:45",
+      "startTime": "09:30",
+      "endTime": "09:45",
+      "duration": "15m",
+      "isBreak": true
+    },
+    {
+      "id": "p3",
+      "type": "period",
+      "number": 3,
+      "label": "Lecture 3",
+      "time": "09:45 - 10:30",
+      "startTime": "09:45",
+      "endTime": "10:30",
+      "duration": "45m"
+    },
+    {
+      "id": "p4",
+      "type": "period",
+      "number": 4,
+      "label": "Lecture 4",
+      "time": "10:30 - 11:15",
+      "startTime": "10:30",
+      "endTime": "11:15",
+      "duration": "45m"
+    },
+    {
+      "id": "b2",
+      "type": "break",
+      "label": "Lunch Break",
+      "time": "11:15 - 11:45",
+      "startTime": "11:15",
+      "endTime": "11:45",
+      "duration": "30m",
+      "isBreak": true
+    },
+    {
+      "id": "p5",
+      "type": "period",
+      "number": 5,
+      "label": "Lecture 5",
+      "time": "11:45 - 12:30",
+      "startTime": "11:45",
+      "endTime": "12:30",
+      "duration": "45m"
+    },
+    {
+      "id": "p6",
+      "type": "period",
+      "number": 6,
+      "label": "Lecture 6",
+      "time": "12:30 - 01:15",
+      "startTime": "12:30",
+      "endTime": "01:15",
+      "duration": "45m"
+    }
+  ],
+  "schedules": {
+    "Class 8-A": {
+      "Friday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "Marathi"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Hindi"
+        },
+        "p5": {
+          "subject": "Games"
+        },
+        "p6": {
+          "subject": "Mathematics"
+        }
+      },
+      "Monday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "English"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Marathi"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Tuesday": {
+        "p1": {
+          "subject": "Games"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Hindi"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Science"
+        }
+      },
+      "Saturday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "Science"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Marathi"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Thursday": {
+        "p1": {
+          "subject": "English"
+        },
+        "p2": {
+          "subject": "Hindi"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Mathematics"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Mathematics"
+        }
+      },
+      "Wednesday": {
+        "p1": {
+          "subject": "Marathi"
+        },
+        "p2": {
+          "subject": "English"
+        },
+        "p3": {
+          "subject": "Mathematics"
+        },
+        "p4": {
+          "subject": "Science"
+        },
+        "p5": {
+          "subject": "Games"
+        },
+        "p6": {
+          "subject": "Hindi"
+        }
+      }
+    },
+    "Class 8-B": {
+      "Friday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "English"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Hindi"
+        },
+        "p5": {
+          "subject": "Games"
+        },
+        "p6": {
+          "subject": "Marathi"
+        }
+      },
+      "Monday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Hindi"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Tuesday": {
+        "p1": {
+          "subject": "English"
+        },
+        "p2": {
+          "subject": "English"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Marathi"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Social Studies"
+        }
+      },
+      "Saturday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Marathi"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Thursday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "Marathi"
+        },
+        "p4": {
+          "subject": "English"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Social Studies"
+        }
+      },
+      "Wednesday": {
+        "p1": {
+          "subject": "English"
+        },
+        "p2": {
+          "subject": "Science"
+        },
+        "p3": {
+          "subject": "Mathematics"
+        },
+        "p4": {
+          "subject": "Marathi"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      }
+    },
+    "Class 9-A": {
+      "Monday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "English"
+        },
+        "p3": {
+          "subject": "Mathematics"
+        },
+        "p4": {
+          "subject": "Social Studies"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Marathi"
+        }
+      },
+      "Tuesday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "Science"
+        },
+        "p3": {
+          "subject": "Social Studies"
+        },
+        "p4": {
+          "subject": "English"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Wednesday": {
+        "p1": {
+          "subject": "Social Studies"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "English"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Marathi"
+        }
+      },
+      "Thursday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Social Studies"
+        },
+        "p5": {
+          "subject": "Games"
+        },
+        "p6": {
+          "subject": "Hindi"
+        }
+      },
+      "Friday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "Science"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Marathi"
+        },
+        "p5": {
+          "subject": "Social Studies"
+        },
+        "p6": {
+          "subject": "Hindi"
+        }
+      },
+      "Saturday": {
+        "p1": {
+          "subject": "English"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Social Studies"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      }
+    },
+    "Class 9-B": {
+      "Monday": {
+        "p1": {
+          "subject": "English"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Marathi"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Social Studies"
+        }
+      },
+      "Tuesday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Social Studies"
+        },
+        "p5": {
+          "subject": "Games"
+        },
+        "p6": {
+          "subject": "Marathi"
+        }
+      },
+      "Wednesday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "Science"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Hindi"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Social Studies"
+        }
+      },
+      "Thursday": {
+        "p1": {
+          "subject": "Social Studies"
+        },
+        "p2": {
+          "subject": "English"
+        },
+        "p3": {
+          "subject": "Mathematics"
+        },
+        "p4": {
+          "subject": "Science"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Friday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Marathi"
+        },
+        "p5": {
+          "subject": "Social Studies"
+        },
+        "p6": {
+          "subject": "Hindi"
+        }
+      },
+      "Saturday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "English"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Hindi"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      }
+    },
+    "Class 10-A": {
+      "Monday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "Science"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Social Studies"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Marathi"
+        }
+      },
+      "Tuesday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "Social Studies"
+        },
+        "p4": {
+          "subject": "English"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Wednesday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "English"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Social Studies"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Marathi"
+        }
+      },
+      "Thursday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Hindi"
+        },
+        "p5": {
+          "subject": "Social Studies"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Friday": {
+        "p1": {
+          "subject": "Social Studies"
+        },
+        "p2": {
+          "subject": "Science"
+        },
+        "p3": {
+          "subject": "Mathematics"
+        },
+        "p4": {
+          "subject": "English"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Hindi"
+        }
+      },
+      "Saturday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "Science"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Social Studies"
+        },
+        "p5": {
+          "subject": "Games"
+        },
+        "p6": {
+          "subject": "Marathi"
+        }
+      }
+    },
+    "Class 10-B": {
+      "Monday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "Social Studies"
+        },
+        "p4": {
+          "subject": "English"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Hindi"
+        }
+      },
+      "Tuesday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "Science"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Social Studies"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Wednesday": {
+        "p1": {
+          "subject": "English"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Social Studies"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Hindi"
+        }
+      },
+      "Thursday": {
+        "p1": {
+          "subject": "Social Studies"
+        },
+        "p2": {
+          "subject": "Science"
+        },
+        "p3": {
+          "subject": "Mathematics"
+        },
+        "p4": {
+          "subject": "English"
+        },
+        "p5": {
+          "subject": "Games"
+        },
+        "p6": {
+          "subject": "Marathi"
+        }
+      },
+      "Friday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "English"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Social Studies"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Marathi"
+        }
+      },
+      "Saturday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Social Studies"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      }
+    },
+    "Class 7-A": {
+      "Monday": {
+        "p1": {
+          "subject": "English"
+        },
+        "p2": {
+          "subject": "Hindi"
+        },
+        "p3": {
+          "subject": "Mathematics"
+        },
+        "p4": {
+          "subject": "Science"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Tuesday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "English"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Hindi"
+        },
+        "p5": {
+          "subject": "Games"
+        },
+        "p6": {
+          "subject": "Marathi"
+        }
+      },
+      "Wednesday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Marathi"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Thursday": {
+        "p1": {
+          "subject": "Hindi"
+        },
+        "p2": {
+          "subject": "English"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Mathematics"
+        },
+        "p5": {
+          "subject": "Social Studies"
+        },
+        "p6": {
+          "subject": "Marathi"
+        }
+      },
+      "Friday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "Science"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Hindi"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Saturday": {
+        "p1": {
+          "subject": "English"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Marathi"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Social Studies"
+        }
+      }
+    },
+    "Class 7-B": {
+      "Monday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "English"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Hindi"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Tuesday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "Hindi"
+        },
+        "p3": {
+          "subject": "Mathematics"
+        },
+        "p4": {
+          "subject": "English"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Wednesday": {
+        "p1": {
+          "subject": "English"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "Science"
+        },
+        "p4": {
+          "subject": "Hindi"
+        },
+        "p5": {
+          "subject": "Social Studies"
+        },
+        "p6": {
+          "subject": "Marathi"
+        }
+      },
+      "Thursday": {
+        "p1": {
+          "subject": "Mathematics"
+        },
+        "p2": {
+          "subject": "Science"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Marathi"
+        },
+        "p5": {
+          "subject": "Hindi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      },
+      "Friday": {
+        "p1": {
+          "subject": "Science"
+        },
+        "p2": {
+          "subject": "English"
+        },
+        "p3": {
+          "subject": "Mathematics"
+        },
+        "p4": {
+          "subject": "Hindi"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Social Studies"
+        }
+      },
+      "Saturday": {
+        "p1": {
+          "subject": "Hindi"
+        },
+        "p2": {
+          "subject": "Mathematics"
+        },
+        "p3": {
+          "subject": "English"
+        },
+        "p4": {
+          "subject": "Science"
+        },
+        "p5": {
+          "subject": "Marathi"
+        },
+        "p6": {
+          "subject": "Games"
+        }
+      }
+    }
+  }
+}
