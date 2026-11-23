@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { logger } from '@/lib/logger';
 import { supabase } from '@/lib/supabaseClient';
-import { getHomeworkAiExplanation, saveHomeworkAiExplanation } from '@/lib/homeworkStore';
+import { getHomeworkAiExplanation, saveHomeworkAiExplanation, getSharedHomework } from '@/lib/homeworkStore';
 
 // Helper to get active Gemini API key from environment or .env.local
 function getGeminiApiKey() {
@@ -312,15 +312,37 @@ async function extractAttachmentInlineData(homework) {
 export async function POST(request) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { homework, targetLanguage = 'en', forceRefresh = false } = body;
+    let { homework, targetLanguage = 'en', forceRefresh = false } = body;
 
-    if (!homework || !homework.message) {
+    if (!homework || (!homework.message && !homework.id)) {
       return NextResponse.json({ error: 'Homework data is required' }, { status: 400 });
+    }
+
+    const hwId = homework.id;
+
+    // 0. Auto-hydrate attachment and full image from server store if client omitted large base64
+    if (hwId) {
+      try {
+        const serverPosts = getSharedHomework();
+        const serverHw = serverPosts.find(h => h.id === hwId);
+        if (serverHw) {
+          homework = {
+            ...serverHw,
+            ...homework,
+            message: homework.message || serverHw.message,
+            subject: homework.subject || serverHw.subject,
+            attachment: (homework.attachment && homework.attachment.url) ? homework.attachment : (serverHw.attachment || homework.attachment),
+            attachments: (homework.attachments && homework.attachments[0]?.url) ? homework.attachments : (serverHw.attachments || homework.attachments),
+            imageUrl: homework.imageUrl || serverHw.imageUrl
+          };
+        }
+      } catch (hydrateErr) {
+        console.warn('[AI_EXPLAIN] Note hydrating homework from store:', hydrateErr.message);
+      }
     }
 
     const lang = targetLanguage || 'en';
     const langLabel = LANGUAGE_LABELS[lang] || 'English';
-    const hwId = homework.id;
 
     // 1. Check persistent Cloud DB / Local Disk cache first (Instant 0ms, 0 tokens)
     if (!forceRefresh && hwId) {
@@ -441,14 +463,10 @@ Output ONLY valid JSON with this exact schema:
 
     // Active Gemini models with multimodal vision support
     const candidateModels = [
-      'gemini-3.1-flash-lite',
-      'gemini-3.5-flash',
-      'gemini-3.8-flash',
-      'gemini-3.6-flash',
-      'gemini-3.7-flash',
-      'gemini-3.1-pro-preview',
-      'gemini-flash-lite-latest',
       'gemini-flash-latest',
+      'gemini-flash-lite-latest',
+      'gemini-3.5-flash',
+      'gemini-3.1-flash-lite',
       'gemini-pro-latest'
     ];
 

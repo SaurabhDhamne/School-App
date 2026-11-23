@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getPdfBlobUrl } from '@/lib/pdfUtils';
+import { DEFAULT_GAZETTED_HOLIDAYS, getLocalCustomHolidays } from '@/lib/holidays';
 import TimetableModal from '@/components/TimetableModal';
 import {
     Calendar as CalendarIcon,
@@ -104,7 +105,8 @@ export default function ParentPortalView({
   onLogout,
   onOpenProfileModal,
   showToast,
-  schoolConfig
+  schoolConfig,
+  customHolidays = []
 }) {
   // Navigation: Homework FIRST, Attendance SECOND
   const [activeTab, setActiveTab] = useState('homework');
@@ -397,6 +399,18 @@ const handleToggleAiExplanation = async (hw, targetLang = null, forceRefresh = f
 
   setAiLoadingHwId(hwId);
   try {
+    // Strip giant base64 data URIs from client request body to avoid HTTP 413 Payload Too Large.
+    // The server hydrates the full high-res worksheet image directly from the server store using hw.id.
+    const sanitizeAtt = (att) => {
+      if (!att) return null;
+      return {
+        name: att.name || 'Worksheet',
+        type: att.type || 'application/pdf',
+        size: att.size || '',
+        url: (typeof att.url === 'string' && !att.url.startsWith('data:')) ? att.url : null
+      };
+    };
+
     const res = await fetch('/api/homework/explain', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -407,9 +421,9 @@ const handleToggleAiExplanation = async (hw, targetLang = null, forceRefresh = f
           message: hw.message,
           deadlineDate: hw.deadlineDate,
           teacherName: hw.teacherName,
-          attachment: hw.attachment,
-          attachments: hw.attachments,
-          imageUrl: hw.imageUrl
+          attachment: sanitizeAtt(hw.attachment),
+          attachments: Array.isArray(hw.attachments) ? hw.attachments.map(sanitizeAtt) : null,
+          imageUrl: (typeof hw.imageUrl === 'string' && !hw.imageUrl.startsWith('data:')) ? hw.imageUrl : null
         },
         targetLanguage: currentLang,
         forceRefresh: Boolean(forceRefresh)
@@ -537,6 +551,91 @@ const classHomework = useMemo(() => {
     return true;
   });
 }, [homeworkList, studentClass, subjectFilter, searchQuery, currentStudent.rollNo]);
+
+// Compile all school holidays for search
+const allSchoolHolidays = useMemo(() => {
+  const list = [];
+  const currentYear = new Date().getFullYear();
+
+  // 1. Fixed national annual holidays
+  const fixedAnnual = [
+    { date: `${currentYear}-01-26`, name: 'Republic Day', type: 'National Holiday' },
+    { date: `${currentYear}-05-01`, name: 'May Day / Maharashtra Day', type: 'State Holiday' },
+    { date: `${currentYear}-08-15`, name: 'Independence Day', type: 'National Holiday' },
+    { date: `${currentYear}-10-02`, name: 'Gandhi Jayanti', type: 'National Holiday' },
+    { date: `${currentYear}-12-25`, name: 'Christmas Day', type: 'Gazetted Holiday' },
+  ];
+
+  // 2. Notable calendar holidays from DEFAULT_GAZETTED_HOLIDAYS
+  if (Array.isArray(DEFAULT_GAZETTED_HOLIDAYS)) {
+    DEFAULT_GAZETTED_HOLIDAYS.forEach(h => {
+      if (h.date) {
+        list.push({ date: h.date, name: h.name, type: 'Gazetted Holiday' });
+      }
+    });
+  }
+
+  fixedAnnual.forEach(h => {
+    if (!list.some(item => item.date === h.date && item.name === h.name)) {
+      list.push(h);
+    }
+  });
+
+  // 3. Custom declared holidays from Admin
+  const activeCustom = Array.isArray(customHolidays) && customHolidays.length > 0 
+    ? customHolidays 
+    : getLocalCustomHolidays();
+
+  if (Array.isArray(activeCustom)) {
+    activeCustom.forEach(ch => {
+      if (ch.date && ch.name) {
+        list.push({ date: ch.date, name: ch.name, type: 'School Declared Holiday' });
+      }
+    });
+  }
+
+  // Sort by date and format
+  return list.map(h => {
+    let formattedDate = h.date;
+    try {
+      const d = new Date(h.date + 'T00:00:00');
+      if (!isNaN(d.getTime())) {
+        formattedDate = d.toLocaleDateString('en-GB', { 
+          weekday: 'short', 
+          day: 'numeric', 
+          month: 'short', 
+          year: 'numeric' 
+        });
+      }
+    } catch (e) {}
+
+    return {
+      ...h,
+      formattedDate,
+      isToday: h.date === todayStr
+    };
+  }).sort((a, b) => a.date.localeCompare(b.date));
+}, [customHolidays, todayStr]);
+
+// Holidays matching parent's search query
+const matchingHolidays = useMemo(() => {
+  if (!searchQuery.trim()) return [];
+  const q = searchQuery.toLowerCase().trim();
+
+  // If generic holiday search term
+  const isGeneric = ['holiday', 'holidays', 'vacation', 'leave', 'off', 'break'].some(w => q.includes(w));
+  if (isGeneric) {
+    return allSchoolHolidays;
+  }
+
+  // Match by holiday name, date, or type
+  return allSchoolHolidays.filter(h => {
+    const inName = h.name.toLowerCase().includes(q);
+    const inType = h.type?.toLowerCase().includes(q);
+    const inDate = h.date?.includes(q) || h.formattedDate?.toLowerCase().includes(q);
+    return inName || inType || inDate;
+  });
+}, [searchQuery, allSchoolHolidays]);
 
 const totalHwCount = classHomework.length;
 const completedHwCount = classHomework.filter(hw => completedHwMap[hw.id]).length;
@@ -683,7 +782,7 @@ return (
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                   <input
                     type="text"
-                    placeholder="Search homework..."
+                    placeholder="Search homework or holidays (e.g. Diwali)..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -721,6 +820,52 @@ return (
 
           {/* Homework Posts Feed */}
           <div className="flex flex-col gap-3.5">
+            {/* Matching School Holidays from Search */}
+            {matchingHolidays.length > 0 && (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-2 px-1">
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+                  <h4 className="text-xs font-black uppercase tracking-wider text-amber-900">
+                    School Holiday {matchingHolidays.length > 1 ? `Matches (${matchingHolidays.length})` : 'Found'}
+                  </h4>
+                </div>
+                <div className="grid grid-cols-1 gap-2.5">
+                  {matchingHolidays.map((hol, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-gradient-to-r from-amber-50/95 via-orange-50/75 to-amber-100/50 border border-amber-200/90 rounded-3xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="flex items-start sm:items-center gap-3.5">
+                        <div className="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-amber-500/20 text-xl font-bold">
+                          🌴
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="text-base font-black text-slate-900">{hol.name}</h3>
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-200/80 text-amber-900 border border-amber-300">
+                              {hol.type || 'School Holiday'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-amber-900/80 font-medium mt-0.5 flex items-center gap-1.5">
+                            <CalendarIcon className="w-3.5 h-3.5 text-amber-600" />
+                            <span>{hol.formattedDate}</span>
+                            {hol.isToday && (
+                              <span className="font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-md text-[10px] border border-emerald-200">
+                                Today
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="self-end sm:self-auto px-3.5 py-1.5 rounded-xl bg-white/90 border border-amber-200 text-amber-900 text-xs font-bold text-center">
+                        School Closed &bull; No Classes
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {classHomework.map(hw => {
               const isDone = !!completedHwMap[hw.id];
               const allAttachments = Array.isArray(hw.attachments) && hw.attachments.length > 0
@@ -1142,12 +1287,12 @@ return (
             );
           })}
 
-          {classHomework.length === 0 && (
+          {classHomework.length === 0 && matchingHolidays.length === 0 && (
                 <div className="bg-white rounded-3xl p-10 text-center border border-slate-200/80 flex flex-col items-center justify-center gap-2">
                   <BookOpen className="w-8 h-8 text-slate-400" />
-                  <h4 className="text-sm font-bold text-slate-700">No Homework Found</h4>
+                  <h4 className="text-sm font-bold text-slate-700">No Results Found</h4>
                   <p className="text-xs text-slate-400">
-                    No active homework or notices posted for {studentClass}.
+                    {searchQuery ? `No homework or holidays matching "${searchQuery}".` : `No active homework or notices posted for ${studentClass}.`}
                   </p>
                 </div>
               )}

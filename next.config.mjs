@@ -3,6 +3,11 @@ const nextConfig = {
   reactStrictMode: true,
   images: {
     unoptimized: true
+  },
+  experimental: {
+    serverActions: {
+      bodySizeLimit: '25mb'
+    }
   }
 };
 
